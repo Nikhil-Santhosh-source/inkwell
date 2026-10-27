@@ -49,6 +49,7 @@ const UNSNAP_DISTANCE = 12; // CSS px: moving on this far after a snap undoes it
 // long, so it keeps up with the tip instead of trailing a frame behind.
 const PREDICT_MS = 12;
 const PREDICT_MAX = 14; // CSS px: never guess further than this
+const PREDICT_STALE = 30; // ms: when the Pencil stops reporting, the guess is dropped (it stopped moving)
 const HANDLE_SIZE = 22; // CSS px hit area of the selection's resize handle
 const SETTLE_TIME = 140; // ms after trackpad/minimap movement stops before the full-quality redraw
 const REFILL_TIME = 120; // ms: while moving, redraw at most this often when the view runs past what was drawn
@@ -1154,6 +1155,14 @@ export class DocumentView {
         }
         this.addInkPoints(points);
         action.predicted = action.snap ? [] : this.predictInk(action, event);
+        // A Pencil held still sends nothing, which would leave the last
+        // guess showing past the tip: redraw without it once it's stale.
+        clearTimeout(action.staleTimer);
+        if (action.predicted.length) action.staleTimer = setTimeout(() => {
+          if (this.action !== action) return;
+          action.predicted = [];
+          this.requestFrame();
+        }, PREDICT_STALE);
         const last = points[points.length - 1];
         if (Math.hypot(last.x - action.holdAnchor.x, last.y - action.holdAnchor.y) * this.scale > SHAPE_HOLD_SLOP) this.armShapeHold(last);
         break;
@@ -1191,6 +1200,7 @@ export class DocumentView {
     if (!action) return;
     this.action = null;
     clearTimeout(action.holdTimer);
+    clearTimeout(action.staleTimer);
     const page = this.pages[action.pageIndex];
     if (commit && page) {
       switch (action.type) {

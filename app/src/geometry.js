@@ -34,7 +34,9 @@ export function pointRadii(stroke, points) {
   const style = strokeStyle(stroke);
   const curve = PRESSURE_CURVES[style] ?? PRESSURE_CURVES.ballpoint;
   const sens = stroke.sens ?? 1;
-  const taper = stroke.taper ?? 0;
+  // Snapped lines and shapes keep their full width to the ends: a tapered
+  // end fades out and makes the line look shorter than it is.
+  const taper = stroke.shape ? 0 : stroke.taper ?? 0;
   const flat = stroke.flat ?? 0.8;
   const half = stroke.width / 2;
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addArrowhead, connectorPoints, cubicAt, fitCubic, followConnectors, recognizeShape,
+  addArrowhead, connectorPoints, cubicAt, fitCubic, followConnectors, pointRadii, recognizeShape,
 } from '../app/src/geometry.js';
 import { translateStroke } from '../app/src/commands.js';
 
@@ -203,4 +203,26 @@ test('with arrows off (the app), a line or curve with a hook at the end stays a 
   // A "V" on its own isn't turned into an arrowhead.
   const v = [...pts((t) => ({ x: 100 + 40 * t, y: 100 + 40 * t }), 10), ...pts((t) => ({ x: 140 - 40 * t, y: 140 + 40 * t }), 10).slice(1)];
   assert.notEqual(recognizeShape(v)?.kind, 'chevron');
+});
+
+test('a snapped line or curve reaches exactly where it was drawn, wobble of the hold included', () => {
+  // The Pencil rests at the end for the hold: a few points jiggling within a pixel or two.
+  const rest = (p) => Array.from({ length: 12 }, (_, i) => ({ x: p.x + Math.sin(i * 2.1) * 1.2, y: p.y + Math.cos(i * 1.7) * 1.2 }));
+  const shaft = pts((t) => ({ x: 100 + 300 * t, y: 200 + Math.sin(t * 9) * 1.5 }), 40);
+  const line = recognizeShape([...shaft, ...rest(shaft.at(-1))]);
+  assert.equal(line.kind, 'line');
+  assert.ok(near(line.start, [100, 200], 2) && near(line.end, [400, 200], 3), `line ${line.start} → ${line.end}`);
+  const bend = pts(arc);
+  const curve = recognizeShape([...bend, ...rest(bend.at(-1))].map(wobble));
+  assert.equal(curve.kind, 'curve');
+  assert.ok(near(curve.start, [100, 300], 3) && near(curve.end, [300, 100], 3), `curve ${curve.start} → ${curve.end}`);
+});
+
+test('snapped lines keep their full width to the ends (no taper)', () => {
+  const line = pts((t) => ({ x: 100 + 300 * t, y: 200 }), 30).map((p) => [p.x, p.y, 0.5]);
+  const fountain = { tool: 'pen', color: '#000', width: 4, style: 'fountain', taper: 0.6, flat: 0 };
+  const free = pointRadii(fountain, line);
+  const snapped = pointRadii({ ...fountain, shape: { kind: 'line' } }, line);
+  assert.ok(free[0] < free[15] * 0.6, 'freehand strokes still taper');
+  assert.ok(Math.abs(snapped[0] - snapped[15]) < 1e-9 && Math.abs(snapped.at(-1) - snapped[15]) < 1e-9);
 });
