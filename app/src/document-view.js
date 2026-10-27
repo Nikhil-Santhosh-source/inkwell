@@ -40,7 +40,10 @@ const TAP_TIME = 350; // ms
 const DOUBLE_TAP_TIME = 400; // ms between the two taps of a double tap
 const PEN_QUIET_TIME = 150; // ms after the Pencil lifts during which finger taps are ignored
 const SHAPE_HOLD_TIME = 550; // ms the Pencil rests at the end of a stroke to turn it into a shape
-const SHAPE_HOLD_SLOP = 3; // page units of wobble allowed while holding
+// Measured on screen, not on the page: zoomed in, a few page units is a
+// lot of hand movement, and slow writing was being taken for a hold.
+const SHAPE_HOLD_SLOP = 4; // CSS px of wobble allowed while holding
+const UNSNAP_DISTANCE = 12; // CSS px: moving on this far after a snap undoes it (still writing)
 const HANDLE_SIZE = 22; // CSS px hit area of the selection's resize handle
 const SETTLE_TIME = 140; // ms after panning/zooming stops before the full-quality redraw
 const NONE = new Set();
@@ -1031,6 +1034,7 @@ export class DocumentView {
       if (this.action !== a || a.snapped || a.snap) return;
       const shape = recognizeShape(a.points);
       if (!shape) return;
+      a.drawn = a.points; // kept in case the Pencil moves on: then it wasn't a hold
       a.points = shape.points.map((p) => ({ x: p.x, y: p.y, pressure: 0.5 }));
       const { points, ...meta } = shape;
       a.shape = meta;
@@ -1047,11 +1051,18 @@ export class DocumentView {
     action.lastLocal = this.toLocal(event.clientX, event.clientY);
     switch (action.type) {
       case 'ink': {
-        if (action.snapped) break; // the shape is final; ignore the wobble
+        if (action.snapped) {
+          // Resting wobble is ignored; moving on means the writing continues.
+          const p = points[points.length - 1];
+          if (Math.hypot(p.x - action.holdAnchor.x, p.y - action.holdAnchor.y) * this.scale < UNSNAP_DISTANCE) break;
+          action.points = action.drawn;
+          action.snapped = false;
+          action.shape = undefined;
+        }
         this.addInkPoints(points);
         action.predicted = action.snap ? [] : (event.getPredictedEvents?.() ?? []).slice(0, 2).map((e) => this.samplePoint(e, action.top));
         const last = points[points.length - 1];
-        if (Math.hypot(last.x - action.holdAnchor.x, last.y - action.holdAnchor.y) > SHAPE_HOLD_SLOP) this.armShapeHold(last);
+        if (Math.hypot(last.x - action.holdAnchor.x, last.y - action.holdAnchor.y) * this.scale > SHAPE_HOLD_SLOP) this.armShapeHold(last);
         break;
       }
       case 'erase':
