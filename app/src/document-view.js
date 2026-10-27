@@ -16,7 +16,7 @@ import { createStroke, getItems, getPaper, newId } from './model.js';
 import {
   RULER_LENGTH, RULER_WIDTH, addArrowhead, closedLoop, connectorTargetAt, eraseFromStroke, isConnectorShape,
   isScribble, itemAt, itemBounds,
-  itemsInLasso, onRuler, projectToRuler, recognizeShape, rulerSnapLine, smoothPoints, strokeAt, strokeHitsCircle,
+  inkCurve, itemsInLasso, onRuler, projectToRuler, recognizeShape, rulerSnapLine, strokeAt, strokeHitsCircle,
   strokeRadius, strokesInLasso, strokesUnderScribble, traceStroke, unionBounds,
 } from './geometry.js';
 import {
@@ -705,7 +705,7 @@ export class DocumentView {
         // curve steps; the saved stroke gets the full treatment on lift.
         const toArray = (p) => (p.azimuth === undefined ? [p.x, p.y, p.pressure] : [p.x, p.y, p.pressure, p.azimuth, p.altitude]);
         const stroke = { ...action.pen, points: [...action.points, ...action.predicted].map(toArray) };
-        fillStroke(ctx, stroke, traceStroke(new Path2D(), stroke, smoothPoints(stroke.points, 2.5)));
+        fillStroke(ctx, stroke, traceStroke(new Path2D(), stroke, inkCurve(stroke, 2.5)));
       } else if (action.type === 'move' || action.type === 'scale') {
         if (action.type === 'move') {
           ctx.translate(action.dx, action.dy);

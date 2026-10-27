@@ -46,11 +46,21 @@ export function pointRadii(stroke, points) {
   const total = along[along.length - 1];
   const taperLength = Math.max(6, stroke.width * 8);
 
+  // The fountain nib's width depends on the direction of travel. Taken from
+  // neighbouring points, every tremor of the hand would flip it between thick
+  // and thin, so it's measured over about half the pen's width.
+  const span = Math.max(1, half * 0.5);
+  let back = 0;
+  let ahead = 0;
+
   return points.map((p, i) => {
     let r = half * (1 + (curve(p[2]) - 1) * sens);
     if (style === 'fountain') {
-      const a = points[Math.max(0, i - 1)];
-      const b = points[Math.min(points.length - 1, i + 1)];
+      while (back < i && along[i] - along[back + 1] >= span) back++;
+      if (ahead < i) ahead = i;
+      while (ahead < points.length - 1 && along[ahead] - along[i] < span) ahead++;
+      const a = points[back];
+      const b = points[ahead];
       const dx = b[0] - a[0];
       const dy = b[1] - a[1];
       const nib = p.length > 3 ? p[3] + Math.PI / 4 : DEFAULT_NIB_ANGLE;
@@ -104,6 +114,72 @@ export function smoothPoints(points, maxStep = 1.5) {
   return out;
 }
 
+// How far (page units) the Pencil's jitter is averaged over. Measured on
+// noisy 240 Hz input: wobbles between neighbouring points drop from 55° to
+// under 10°, while a small letter (8 units across) shrinks by under 0.4 units.
+const INK_STEADY = 2.5;
+
+// The centre line of a stroke as drawn: the Pencil's points with their
+// sensor jitter evened out (see steadyPoints), then smoothed into a curve.
+// Snapped shapes keep their exact corners.
+export function inkCurve(stroke, maxStep = 1.5) {
+  if (stroke.shape) return smoothPoints(stroke.points, maxStep);
+  return smoothPoints(steadyPoints(mergeNearPoints(stroke.points), INK_STEADY), maxStep);
+}
+
+// Distance travelled along a polyline at each point.
+function distances(points) {
+  const along = [0];
+  for (let i = 1; i < points.length; i++) {
+    along.push(along[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]));
+  }
+  return along;
+}
+
+// Gaussian average of values[i] (numbers or [x, y]) over `sigma` units of
+// distance along the stroke. The window narrows toward the ends, so a stroke
+// keeps its exact start and end (and a taper stays sharp).
+function averageAlong(along, values, sigma, get, set) {
+  const n = along.length;
+  const total = along[n - 1];
+  return values.map((v, i) => {
+    const reach = Math.min(3 * sigma, along[i], total - along[i]);
+    if (reach <= 0) return v;
+    const sum = [0, 0];
+    let weights = 0;
+    const add = (j) => {
+      const w = Math.exp(-(((along[j] - along[i]) / sigma) ** 2) / 2);
+      const x = get(values[j]);
+      sum[0] += x[0] * w;
+      sum[1] += x[1] * w;
+      weights += w;
+    };
+    for (let j = i; j >= 0 && along[i] - along[j] <= reach; j--) add(j);
+    for (let j = i + 1; j < n && along[j] - along[i] <= reach; j++) add(j);
+    return set(v, sum[0] / weights, sum[1] / weights);
+  });
+}
+
+// Evens out tiny wobbles in closely spaced points (the Pencil reports up to
+// 240 positions a second, each a fraction of a pixel off). Points far apart
+// (fast writing) are barely touched, so letters keep their size and shape.
+export function steadyPoints(points, sigma) {
+  if (points.length < 3 || sigma <= 0) return points;
+  return averageAlong(distances(points), points, sigma, (p) => p, (p, x, y) => {
+    const q = p.slice();
+    q[0] = x;
+    q[1] = y;
+    return q;
+  });
+}
+
+// Evens out the width along a stroke: pressure readings and the fountain
+// nib's angle flicker from point to point, which made lumpy edges.
+function steadyRadii(points, radii, sigma) {
+  if (points.length < 3) return radii;
+  return averageAlong(distances(points), radii, sigma, (r) => [r, 0], (r, x) => x);
+}
+
 // Safari often reports the Pencil twice at (almost) the same spot, e.g. when
 // only the pressure changed. A spline forced through two near-identical
 // points kinks sharply there (a 5° bend became 95° in testing), so points
@@ -147,12 +223,18 @@ function centripetal(p0, p1, p2, p3, t) {
   return mix(b1, b2, t1, t2);
 }
 
-// Builds the filled outline of a stroke as a union of round-capped segments
-// ("capsules"). All sub-paths wind the same way, so a single nonzero fill
-// covers overlaps once: translucent highlighters don't darken where they cross.
+// Builds the filled outline of a stroke as a union of pieces that all wind
+// the same way, so a single nonzero fill covers overlaps once (translucent
+// highlighters don't darken where they cross):
+//   - round caps at both ends;
+//   - a circle at every point, the width of the ink there;
+//   - between neighbouring points, the shape that hugs both circles (its
+//     sides are the circles' shared tangents, so where the width changes the
+//     edge runs on smoothly instead of stepping).
 // `path` is anything with moveTo/lineTo/arc/closePath, such as a Path2D.
-export function traceStroke(path, stroke, points = smoothPoints(stroke.points)) {
-  const radii = pointRadii(stroke, points);
+
+export function traceStroke(path, stroke, points = inkCurve(stroke)) {
+  const radii = steadyRadii(points, pointRadii(stroke, points), Math.max(1, stroke.width * 0.4));
   const circle = (x, y, r) => {
     path.moveTo(x + r, y);
     path.arc(x, y, r, 0, Math.PI * 2, false);
@@ -166,17 +248,24 @@ export function traceStroke(path, stroke, points = smoothPoints(stroke.points)) 
     const dx = bx - ax;
     const dy = by - ay;
     const len = Math.hypot(dx, dy);
-    if (len > 1e-6) {
-      const nx = -dy / len;
-      const ny = dx / len;
-      // Clockwise on screen (y down), matching arc(..., false).
-      path.moveTo(ax - nx * ra, ay - ny * ra);
-      path.lineTo(bx - nx * rb, by - ny * rb);
-      path.lineTo(bx + nx * rb, by + ny * rb);
-      path.lineTo(ax + nx * ra, ay + ny * ra);
-      path.closePath();
-    }
     circle(bx, by, rb);
+    // When one circle swallows the other, the circles alone are the piece.
+    if (len < 1e-6 || Math.abs(ra - rb) >= len) continue;
+    const ux = dx / len;
+    const uy = dy / len;
+    const sin = (ra - rb) / len;
+    const cos = Math.sqrt(1 - sin * sin);
+    // Unit vectors from each centre to where the shared tangents touch.
+    const lx = sin * ux - cos * uy;
+    const ly = sin * uy + cos * ux;
+    const qx = sin * ux + cos * uy;
+    const qy = sin * uy - cos * ux;
+    // Clockwise on screen (y down), matching arc(..., false).
+    path.moveTo(ax + qx * ra, ay + qy * ra);
+    path.lineTo(bx + qx * rb, by + qy * rb);
+    path.lineTo(bx + lx * rb, by + ly * rb);
+    path.lineTo(ax + lx * ra, ay + ly * ra);
+    path.closePath();
   }
   return path;
 }

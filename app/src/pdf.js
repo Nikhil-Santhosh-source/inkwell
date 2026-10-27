@@ -2,7 +2,7 @@
 // content, so exported handwriting stays sharp at any zoom; pictures and
 // imported PDF pages are embedded as JPEG images. No dependencies.
 
-import { smoothPoints, traceStroke } from './geometry.js';
+import { inkCurve, traceStroke } from './geometry.js';
 import { getItems, getPaper, strokeStyle, strokeTool } from './model.js';
 import { paperLayout } from './paper.js';
 import { HIGHLIGHTER_ALPHA, PENCIL_ALPHA, TEXT_LINE_HEIGHT } from './render.js';
@@ -76,7 +76,7 @@ function imageOps(name, x, y, w, h) {
 }
 
 function strokeOps(stroke) {
-  const path = traceStroke(new PdfPath(), stroke, smoothPoints(stroke.points, 2));
+  const path = traceStroke(new PdfPath(), stroke, inkCurve(stroke, 2));
   const fill = [color(stroke.color, 'rg'), ...path.ops, 'f'];
   if (strokeTool(stroke) === 'highlighter') return ['q', '/GSh gs', ...fill, 'Q'];
   if (strokeStyle(stroke) === 'pencil') return ['q', '/GSp gs', ...fill, 'Q'];

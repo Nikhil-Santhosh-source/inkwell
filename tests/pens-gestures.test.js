@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createDocument, createPage, createStroke, createTextItem, createWhiteboardPage } from '../app/src/model.js';
 import {
   arrowPoints, closedLoop, connectorTargetAt, followConnectors, isScribble, pointRadii, recognizeShape,
-  smoothPoints, strokesUnderScribble,
+  inkCurve, smoothPoints, strokesUnderScribble, traceStroke,
 } from '../app/src/geometry.js';
 import { applyCommand, invertCommand, lockCommand, moveStrokesCommand, translateStroke } from '../app/src/commands.js';
 import { contentBounds, finitePage } from '../app/src/whiteboard.js';
@@ -201,4 +201,76 @@ test('a stroke that closes on itself is a loop usable as a lasso', () => {
   assert.equal(closedLoop(loop).length, loop.length);
   assert.equal(closedLoop(pts((t) => ({ x: t * 300, y: 0 }))), null);
   assert.equal(closedLoop(pts((t) => ({ x: 5 * Math.cos(t * 6.2), y: 5 * Math.sin(t * 6.2) }))), null, 'too small');
+});
+
+// ---- Smooth ink ----
+
+// A circle written fast and noisily, as the Pencil reports it at 240 Hz:
+// positions a fraction of a unit off, pressure and angle flickering.
+function noisyCircle(seed = 3) {
+  let s = seed;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647) - 0.5;
+  return Array.from({ length: 161 }, (_, i) => {
+    const a = (i / 160) * Math.PI * 2;
+    return [200 + 60 * Math.cos(a) + rnd() * 1.4, 200 + 60 * Math.sin(a) + rnd() * 1.4, 0.55 + rnd() * 0.3, -0.6 + rnd() * 0.5, 1 + rnd() * 0.2];
+  });
+}
+
+function outlineCircles(stroke) {
+  const circles = [];
+  traceStroke({ moveTo() {}, lineTo() {}, closePath() {}, arc(x, y, r) { circles.push({ x, y, r }); } }, stroke);
+  return circles;
+}
+
+test('noisy Pencil input gives a smooth line and an even width', () => {
+  for (const style of ['ballpoint', 'fountain']) {
+    const stroke = { ...pen({ style, width: 15.5 }), points: noisyCircle() };
+    const circles = outlineCircles(stroke);
+    let widthJump = 0;
+    let bend = 0;
+    // The tips stay exactly where the Pencil touched down and lifted (under
+    // the round caps), so the line is measured away from them.
+    for (let i = 6; i < circles.length - 5; i++) {
+      const [a, b, c] = [circles[i - 2], circles[i - 1], circles[i]];
+      const step = Math.hypot(c.x - b.x, c.y - b.y) || 1;
+      widthJump = Math.max(widthJump, Math.abs(c.r - b.r) / step);
+      let d = Math.abs(Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(b.y - a.y, b.x - a.x));
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      bend = Math.max(bend, d);
+    }
+    // The width changes gradually (no lumps) and the line doesn't zigzag.
+    assert.ok(widthJump < 0.35, `${style}: width jumps ${widthJump.toFixed(2)} per unit`);
+    assert.ok((bend * 180) / Math.PI < 12, `${style}: bends ${((bend * 180) / Math.PI).toFixed(1)}° between neighbours`);
+    // Still the same size of circle, starting and ending where it was drawn.
+    const r = circles.map((c) => Math.hypot(c.x - 200, c.y - 200));
+    assert.ok(Math.min(...r) > 57 && Math.max(...r) < 63);
+    assert.ok(Math.hypot(circles[0].x - stroke.points[0][0], circles[0].y - stroke.points[0][1]) < 1e-6);
+  }
+});
+
+test('outline pieces meet the circles at their shared tangents', () => {
+  const quads = [];
+  let current = [];
+  const recorder = {
+    moveTo(x, y) { current = [[x, y]]; },
+    lineTo(x, y) { current.push([x, y]); },
+    closePath() { quads.push(current); },
+    arc() {},
+  };
+  // A line that thickens: the sides must touch both end circles exactly.
+  const stroke = { ...pen({ sens: 1 }), points: [[0, 0, 0.1], [40, 0, 1]] };
+  traceStroke(recorder, stroke, stroke.points);
+  const radii = pointRadii(stroke, stroke.points);
+  const [q] = quads;
+  assert.ok(Math.abs(Math.hypot(q[0][0], q[0][1]) - radii[0]) < 1e-9);
+  assert.ok(Math.abs(Math.hypot(q[1][0] - 40, q[1][1]) - radii[1]) < 1e-9);
+  // The side is perpendicular to the radius at both ends (a true tangent).
+  const side = [q[1][0] - q[0][0], q[1][1] - q[0][1]];
+  assert.ok(Math.abs(side[0] * q[0][0] + side[1] * q[0][1]) < 1e-6);
+});
+
+test('snapped shapes keep sharp corners', () => {
+  const box = [[0, 0, 0.5], [50, 0, 0.5], [50, 50, 0.5]];
+  const stroke = { ...pen(), points: box, shape: { kind: 'rectangle' } };
+  assert.ok(inkCurve(stroke).some((p) => Math.hypot(p[0] - 50, p[1]) < 1e-9), 'corner kept exactly');
 });
