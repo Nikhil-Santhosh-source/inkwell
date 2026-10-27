@@ -1125,7 +1125,7 @@ export class DocumentView {
     a.holdAnchor = point;
     a.holdTimer = setTimeout(() => {
       if (this.action !== a || a.snapped || a.snap) return;
-      if (this.gestures.scribble && isScribble(a.points)) return; // a scribble that paused is still a scribble
+      if (this.gestures.scribble && isScribble(a.points, a.pen.res)) return; // a scribble that paused is still a scribble
       const shape = recognizeShape(a.points);
       if (!shape) return;
       a.drawn = a.points; // kept in case the Pencil moves on: then it wasn't a hold
@@ -1245,8 +1245,8 @@ export class DocumentView {
       action.points.push(action.lastRaw); // the steadied line ends where the Pencil lifted
     }
     const freehand = pen.tool === 'pen' && !action.snapped && !action.snap;
-    if (freehand && this.gestures.scribble && isScribble(action.points)) {
-      const ids = strokesUnderScribble(page.strokes, action.points);
+    if (freehand && this.gestures.scribble && isScribble(action.points, pen.res)) {
+      const ids = strokesUnderScribble(page.strokes, action.points, pen.res);
       if (ids.length) {
         this.onCommand?.(page.id, removeStrokesCommand(page, ids));
         return;

@@ -1028,19 +1028,21 @@ export function followConnectors(strokes, movedIds, dx, dy) {
 // (side to side, or up and down while moving along a word). Told apart from
 // handwriting like "mmm" by how tightly the zigzags sit: a scribble's
 // strokes overlap, each one only a little beside the last, while letters
-// move along by about their own height. points: [{ x, y }].
-export function isScribble(points) {
-  if (points.length < 12) return false;
+// move along by about their own height. points: [{ x, y }]; res is page
+// units per screen pixel when drawn (the zoom), as sizes are judged on
+// screen: a scribble over a small letter is small however far zoomed in.
+export function isScribble(points, res = 1) {
+  if (points.length < 8) return false;
   const length = pathLength(points);
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
   const extent = { x: Math.max(...xs) - Math.min(...xs), y: Math.max(...ys) - Math.min(...ys) };
   const diag = Math.hypot(extent.x, extent.y);
-  if (diag < 10 || length < diag * 2.5) return false;
+  if (diag < 6 * res || length < diag * 2.5) return false;
   // Direction changes along an axis, ignoring wiggles under 20% of the
   // scribble's size that way.
   const reversals = (axis) => {
-    const slop = Math.max(3, extent[axis] * 0.2);
+    const slop = Math.max(2 * res, extent[axis] * 0.2);
     let count = 0;
     let direction = 0;
     let extreme = points[0][axis]; // furthest point reached in the current direction
@@ -1071,9 +1073,9 @@ export function isScribble(points) {
 
 // Strokes a scribble crosses out (locked ones are kept): those mostly inside
 // the scribble's area (35% of their points), and those it goes back and
-// forth over at least three times while covering a good part of them (15%),
-// such as part of a long cursive word.
-export function strokesUnderScribble(strokes, points) {
+// forth over at least three times, however long they are (part of a long
+// cursive word, or of a drawing). res: page units per screen pixel.
+export function strokesUnderScribble(strokes, points, res = 1) {
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
   const box = { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
@@ -1083,12 +1085,11 @@ export function strokesUnderScribble(strokes, points) {
     if (bounds.maxX < box.minX || bounds.minX > box.maxX || bounds.maxY < box.minY || bounds.minY > box.maxY) return false;
     const inside = s.points.filter(([x, y]) => x >= box.minX && x <= box.maxX && y >= box.minY && y <= box.maxY).length / s.points.length;
     if (inside >= 0.35) return true;
-    if (inside < 0.15) return false;
     // Count the separate times the scribble passes over the stroke.
     let passes = 0;
     let over = false;
     for (const p of points) {
-      const hit = strokeHitsCircle(s, p.x, p.y, 2, bounds);
+      const hit = strokeHitsCircle(s, p.x, p.y, 2 * res, bounds);
       if (hit && !over) passes++;
       over = hit;
     }

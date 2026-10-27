@@ -343,3 +343,24 @@ test('a scribble over part of a long stroke erases it', () => {
   const across = pts((t) => ({ x: 300, y: 150 + t * 100 }), 40);
   assert.deepEqual(strokesUnderScribble([long], across), []);
 });
+
+test('scribbles over small letters count, at any zoom', () => {
+  // A small letter is about 14 px tall on screen; the scribble over it ~16 px wide.
+  for (const res of [0.27, 0.7, 1.6]) {
+    const px = (v) => v * res;
+    const letter = createStroke(pts((t) => ({ x: 100 + px(8) * Math.cos(t * 6.28), y: 100 + px(7) * Math.sin(t * 6.28), pressure: 0.5 }), 40), pen({ width: px(2) }));
+    const scribble = pts((t) => ({ x: 100 + Math.sin(t * Math.PI * 9) * px(9), y: 100 - px(6) + t * px(12) }), 50);
+    assert.ok(isScribble(scribble, res), `scribble at res ${res}`);
+    assert.deepEqual(strokesUnderScribble([letter], scribble, res), [letter.id], `letter erased at res ${res}`);
+    // A tiny tick or dot isn't a scribble.
+    assert.ok(!isScribble(pts((t) => ({ x: 100 + px(2) * t, y: 100 + px(2) * Math.sin(t * 9) }), 20), res));
+  }
+});
+
+test('a scribble over one part of a big drawing erases that drawing stroke', () => {
+  // A large circle drawn in one stroke; the scribble covers about a tenth of it.
+  const circle = createStroke(pts((t) => ({ x: 300 + 150 * Math.cos(t * 6.28), y: 300 + 150 * Math.sin(t * 6.28), pressure: 0.5 }), 200), pen());
+  const scribble = pts((t) => ({ x: 450 + Math.sin(t * Math.PI * 12) * 20, y: 270 + t * 60 }), 120);
+  assert.ok(isScribble(scribble));
+  assert.deepEqual(strokesUnderScribble([circle], scribble), [circle.id]);
+});
