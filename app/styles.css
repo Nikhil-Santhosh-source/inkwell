@@ -289,6 +289,8 @@ input[type="range"] { accent-color: var(--accent); }
 .search { width: min(280px, 36vw); padding-left: 36px !important; background: var(--surface-2) !important; border-color: transparent !important; }
 .sort { background: var(--surface-2) !important; border-color: transparent !important; }
 .new-doc-btn { display: inline-flex; align-items: center; gap: 6px; }
+.backup-btn { gap: 6px; font-weight: 500; }
+.backup-btn svg { color: var(--accent); }
 .new-doc-btn svg { width: 18px; height: 18px; stroke-width: 2.4; }
 .library .popover { top: 64px; }
 
@@ -806,7 +808,7 @@ dialog.shortcuts { width: min(700px, calc(100vw - 32px)); }
 /* ---------- Small screens, reduced motion ---------- */
 
 @media (max-width: 760px) {
-  .status, .text-btn span, .sort, .new-doc-btn span { display: none; }
+  .status, .text-btn span, .sort, .new-doc-btn span, .backup-btn span { display: none; }
   .search { width: 44vw; }
   .doc-list { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 24px 16px; padding: 18px 16px 40px; }
   .library-heading, .folder-bar { padding-left: 16px; padding-right: 16px; }

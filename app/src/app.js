@@ -1913,7 +1913,7 @@ async function route() {
 // Save immediately when the app is hidden or closed (app switcher, Home, lock).
 function flushNow() {
   commitText();
-  editor?.saver.flush();
+  return editor?.saver.flush();
 }
 
 // ---- Updates ----
@@ -2007,6 +2007,12 @@ async function start() {
   on('import-pdf', 'click', importPdf);
   on('new-folder', 'click', newFolder);
   on('backup', 'click', backupLibrary);
+  on('backup-btn', 'click', backupLibrary);
+  // From a notebook, save what's just been written before backing up.
+  on('editor-backup-btn', 'click', async () => {
+    await flushNow();
+    return backupLibrary();
+  });
   on('restore', 'click', restoreLibrary);
   on('empty-new-doc', 'click', newDocument);
   const cardAction = (id, fn) => on(id, 'click', () => {
