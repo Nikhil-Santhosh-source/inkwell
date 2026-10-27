@@ -137,3 +137,56 @@ test('handwriting and scribbles still are not turned into shapes', () => {
   const word = pts((t) => ({ x: 100 + 300 * t, y: 200 + Math.sin(t * 40) * 25 + Math.cos(t * 17) * 10 }));
   assert.equal(recognizeShape(word), null);
 });
+
+// A closed outline through `corners`, drawn starting `startAt` of the way
+// round, ending `extra` of the way past the start (negative leaves a gap).
+function outline(corners, startAt, extra, n = 120) {
+  const ring = [...corners, corners[0]];
+  const lens = ring.slice(1).map((c, i) => Math.hypot(c.x - ring[i].x, c.y - ring[i].y));
+  const total = lens.reduce((s, v) => s + v, 0);
+  const at = (f) => {
+    let d = (((f % 1) + 1) % 1) * total;
+    for (let i = 0; i < lens.length; i++) {
+      if (d <= lens[i]) return { x: ring[i].x + ((ring[i + 1].x - ring[i].x) * d) / lens[i], y: ring[i].y + ((ring[i + 1].y - ring[i].y) * d) / lens[i] };
+      d -= lens[i];
+    }
+    return ring[0];
+  };
+  return pts((t) => at(startAt + t * (1 + extra)), n).map(wobble);
+}
+
+test('closed shapes are never mistaken for arrows, wherever they start or end', () => {
+  const shapes = {
+    triangle: [{ x: 200, y: 100 }, { x: 320, y: 300 }, { x: 80, y: 300 }],
+    rectangle: [{ x: 100, y: 100 }, { x: 340, y: 100 }, { x: 340, y: 260 }, { x: 100, y: 260 }],
+    diamond: [{ x: 200, y: 80 }, { x: 320, y: 200 }, { x: 200, y: 320 }, { x: 80, y: 200 }],
+  };
+  for (const [kind, corners] of Object.entries(shapes)) {
+    for (const startAt of [0, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 0.9]) {
+      for (const extra of [-0.04, 0, 0.05, 0.1]) {
+        const shape = recognizeShape(outline(corners, startAt, extra));
+        const want = kind === 'triangle' ? 'triangle' : 'rectangle';
+        assert.equal(shape?.kind, want, `${kind} starting at ${startAt}, overshoot ${extra}: got ${shape?.kind}`);
+      }
+    }
+  }
+});
+
+test('a closed shape with a little hook where the pen lifts is not an arrow', () => {
+  const square = [{ x: 100, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 300 }, { x: 100, y: 300 }];
+  const triangle = [{ x: 200, y: 100 }, { x: 320, y: 300 }, { x: 80, y: 300 }];
+  for (const [corners, kind] of [[square, 'rectangle'], [triangle, 'triangle']]) {
+    for (const startAt of [0, 0.3, 0.7]) {
+      const path = outline(corners, startAt, 0.02);
+      const end = path[path.length - 1];
+      const prev = path[path.length - 6];
+      const heading = Math.atan2(end.y - prev.y, end.x - prev.x);
+      // The pen flicks back sharply (about 150°) for a short way as it lifts.
+      const hook = barb(end, heading, 1, 18, 5);
+      assert.equal(recognizeShape([...path, ...hook]).kind, kind, `${kind} starting at ${startAt}`);
+    }
+  }
+  // A real arrow still is one.
+  const shaft = pts((t) => ({ x: 100 + 300 * t, y: 200 }), 40);
+  assert.equal(recognizeShape([...shaft, ...barb({ x: 400, y: 200 }, 0, 1)].map(wobble)).kind, 'arrow');
+});

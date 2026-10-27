@@ -399,6 +399,11 @@ export function recognizeShape(points) {
     return connectorShape(straightControls(first, snapLine(first, last)), { start: false, end: false });
   }
 
+  // A stroke that comes back to where it started is a closed shape, even
+  // with an overshoot or a little hook at the end; never an arrow.
+  const loop = closeLoop(points, diag);
+  if (loop) return recognizeClosed(loop, diag);
+
   // Arrows, straight or curved: a shaft with a barb doubling back at either end.
   const arrow = recognizeArrow(points);
   if (arrow) return arrow;
@@ -413,19 +418,67 @@ export function recognizeShape(points) {
     if (fit && fit.error < Math.max(5, length * 0.045)) return connectorShape(fit.controls, { start: false, end: false });
     return null;
   }
+  return recognizeClosed(points, diag);
+}
+
+// The part of a stroke that goes once round, if its end comes back near its
+// start (within 20% of the shape's size). Whatever is drawn past the closest
+// approach to the start is trimmed. Returns null for open strokes.
+function closeLoop(points, diag) {
+  const first = points[0];
+  let best = -1;
+  let bestGap = diag * 0.2;
+  for (let i = Math.floor(points.length * 0.6); i < points.length; i++) {
+    const gap = Math.hypot(points[i].x - first.x, points[i].y - first.y);
+    if (gap <= bestGap) {
+      bestGap = gap;
+      best = i;
+    }
+  }
+  return best < 0 ? null : points.slice(0, best + 1);
+}
+
+// Corners of a closed outline. It's walked from its farthest point from the
+// centre (always a real corner), so starting to draw mid-side doesn't add a
+// corner; corners where the outline barely turns are dropped.
+function loopCorners(points, diag) {
+  const cx = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+  const cy = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+  let far = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (Math.hypot(points[i].x - cx, points[i].y - cy) > Math.hypot(points[far].x - cx, points[far].y - cy)) far = i;
+  }
+  const path = [...points.slice(far), ...points.slice(0, far), points[far]];
+  let corners = simplify(path, diag * 0.09).slice(0, -1);
+  for (let i = 0; corners.length > 3 && i < corners.length; i++) {
+    const prev = corners[(i + corners.length - 1) % corners.length];
+    const c = corners[i];
+    const next = corners[(i + 1) % corners.length];
+    let turn = Math.abs(Math.atan2(next.y - c.y, next.x - c.x) - Math.atan2(c.y - prev.y, c.x - prev.x));
+    if (turn > Math.PI) turn = 2 * Math.PI - turn;
+    if (turn < (28 * Math.PI) / 180) {
+      corners = corners.filter((_, k) => k !== i);
+      i = -1;
+    }
+  }
+  return { path, corners };
+}
+
+// Closed shapes: triangle, rectangle/square, diamond, polygon, ellipse/circle.
+function recognizeClosed(points, diag) {
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
   const rx = Math.max((maxX - minX) / 2, 1);
   const ry = Math.max((maxY - minY) / 2, 1);
   const ellipseError = points.reduce((sum, p) => sum + Math.abs(Math.hypot((p.x - cx) / rx, (p.y - cy) / ry) - 1), 0) / points.length;
 
-  const closed = [...points, first];
-  let corners = simplify(closed, diag * 0.09);
-  if (corners.length > 2) corners = corners.slice(0, -1); // drop the repeated start
-  // Merge a corner split across the start/end join.
-  if (corners.length > 3 && Math.hypot(corners[0].x - corners[corners.length - 1].x, corners[0].y - corners[corners.length - 1].y) < diag * 0.12) {
-    corners = corners.slice(0, -1);
-  }
+  const { path: closed, corners } = loopCorners(points, diag);
 
   if (corners.length === 3 && ellipseError > 0.1) {
     return { kind: 'triangle', points: edgePoints([...corners, corners[0]]) };
