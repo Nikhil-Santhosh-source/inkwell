@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#f6f3ec">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Inkwell">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <script>
+    // Apply the saved theme before anything draws (no flash of the wrong one).
+    try {
+      const t = JSON.parse(localStorage.getItem('inkwell.theme')) || {};
+      document.documentElement.dataset.theme = t.theme || 'inkwell';
+      document.documentElement.dataset.appearance = t.appearance || 'auto';
+    } catch { /* first run */ }
+  </script>
+  <link rel="stylesheet" href="styles.css">
+  <title>Inkwell</title>
+</head>
+<body>
+  <button id="banner" class="banner" hidden onclick="this.hidden = true" aria-live="assertive"></button>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="update-banner" class="update-banner" role="status" hidden>
+    <span>A new version of Inkwell is ready.</span>
+    <button id="update-later">Later</button>
+    <button id="update-now" class="primary">Update</button>
+  </div>
+
+  <main id="library" class="view library" hidden>
+    <header class="bar library-bar">
+      <h1 class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="9" fill="var(--accent)"/>
+          <path d="M16 6.5c3.6 5 6 8.4 6 11.3a6 6 0 0 1-12 0c0-2.9 2.4-6.3 6-11.3z" fill="var(--accent-text)"/>
+          <circle cx="19" cy="18.5" r="2" fill="var(--accent-2)"/>
+        </svg>
+        <span class="brand-name">Inkwell</span>
+      </h1>
+      <label class="search-wrap">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+        <input id="search" class="search" type="search" placeholder="Search" aria-label="Search notebooks" autocomplete="off">
+      </label>
+      <select id="sort" class="sort" aria-label="Sort notebooks">
+        <option value="modified">Last edited</option>
+        <option value="title">Name</option>
+        <option value="created">Date created</option>
+      </select>
+      <button id="library-more" class="icon-btn" aria-label="More options" aria-haspopup="true" aria-expanded="false" title="More">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
+      </button>
+      <button id="new-doc" class="primary new-doc-btn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New</span>
+      </button>
+    </header>
+    <div id="backup-reminder" class="backup-reminder" hidden>
+      <span id="backup-reminder-text"></span>
+      <button id="backup-now" class="primary">Back up now</button>
+    </div>
+    <div class="library-heading">
+      <h2 id="library-heading-title">Notebooks</h2>
+      <span id="library-count"></span>
+    </div>
+    <nav id="folder-bar" class="folder-bar" aria-label="Folders"></nav>
+    <div id="library-empty" class="empty-state" hidden>
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <rect x="26" y="16" width="64" height="86" rx="8" fill="var(--accent)"/>
+        <rect x="26" y="16" width="10" height="86" rx="4" fill="var(--accent-deep)"/>
+        <rect x="44" y="30" width="36" height="5" rx="2.5" fill="var(--accent-text)" opacity="0.85"/>
+        <rect x="44" y="41" width="26" height="5" rx="2.5" fill="var(--accent-text)" opacity="0.55"/>
+        <path d="M86 56l14-14a5 5 0 0 1 7 7L93 63l-10 3z" fill="var(--accent-2)"/>
+      </svg>
+      <h3 id="library-empty-title">Your shelf is empty</h3>
+      <p id="library-empty-text">Make a notebook for each class, or a whiteboard for brainstorming.</p>
+      <button id="empty-new-doc" class="primary">New notebook</button>
+    </div>
+    <ul id="doc-list" class="doc-list"></ul>
+
+    <div id="card-menu" class="popover card-menu" hidden>
+      <button id="card-rename" class="menu-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5a2.1 2.1 0 0 1 3 3L8.5 18z"/></svg>Rename</button>
+      <button id="card-move" class="menu-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Move to folder</button>
+      <button id="card-duplicate" class="menu-row"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>Duplicate</button>
+      <div class="menu-sep"></div>
+      <button id="card-delete" class="menu-row danger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>Delete</button>
+    </div>
+
+    <div id="library-menu" class="popover popover-narrow" hidden>
+      <button id="import-pdf" class="menu-row">Import PDF…</button>
+      <button id="new-folder" class="menu-row">New folder…</button>
+      <button id="backup" class="menu-row">Back up library…</button>
+      <button id="restore" class="menu-row">Restore from backup…</button>
+      <h2>Appearance</h2>
+      <div class="theme-picker" data-theme-picker></div>
+      <p id="app-version" class="menu-note"></p>
+    </div>
+  </main>
+
+  <main id="editor" class="view editor" hidden>
+    <header class="bar editor-bar">
+      <div class="bar-side">
+        <button id="back" class="icon-btn text-btn" aria-label="Back to library">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>Library</span>
+        </button>
+        <button id="pages-btn" class="icon-btn" aria-label="Pages" aria-pressed="false" title="Pages">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="7" height="7" rx="1.5"/><rect x="13.5" y="4" width="7" height="7" rx="1.5"/><rect x="3.5" y="14" width="7" height="7" rx="1.5"/><rect x="13.5" y="14" width="7" height="7" rx="1.5"/></svg>
+        </button>
+      </div>
+      <h1 id="doc-title" class="editor-title"></h1>
+      <div class="bar-side bar-end">
+        <span id="save-status" class="status" role="status" aria-live="polite"></span>
+        <button id="undo" class="icon-btn" aria-label="Undo" title="Undo (⌘Z · two-finger tap)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7H4V2"/><path d="M4.5 7A8 8 0 1 1 6 17"/></svg>
+        </button>
+        <button id="redo" class="icon-btn" aria-label="Redo" title="Redo (⇧⌘Z · three-finger tap)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7h5V2"/><path d="M19.5 7A8 8 0 1 0 18 17"/></svg>
+        </button>
+        <button id="add-page-btn" class="icon-btn" aria-label="Add page after this one" title="Add page">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M12 11v6M9 14h6"/></svg>
+        </button>
+        <button id="paper-btn" class="icon-btn" aria-label="Paper style" aria-haspopup="true" aria-expanded="false" title="Paper style">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+        </button>
+        <button id="more-btn" class="icon-btn" aria-label="More options" aria-haspopup="true" aria-expanded="false" title="More">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="toolbar" class="toolbar" role="toolbar" aria-label="Writing tools">
+      <div id="toolbar-grip" class="toolbar-grip" role="button" tabindex="0" aria-label="Drag to move the toolbar" title="Drag to move">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" stroke-width="3"/></svg>
+      </div>
+      <div class="tool-group">
+        <button class="tool" data-tool="pen" aria-label="Pen" title="Pen (P)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5a2.1 2.1 0 0 1 3 3L8.5 18z"/><path d="M14 6.5l3 3"/></svg>
+        </button>
+        <button class="tool" data-tool="highlighter" aria-label="Highlighter" title="Highlighter (H)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 15l-2 4h5l1-2"/><path d="M9 15l7.5-11 4 3L13 17z"/><path d="M3 21h18" class="accent"/></svg>
+        </button>
+        <button class="tool" data-tool="eraser" aria-label="Eraser" title="Eraser (E)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20h12"/><path d="M4.6 14.6l9-9a2 2 0 0 1 2.8 0l3 3a2 2 0 0 1 0 2.8L12 19H8.4z"/><path d="M9 10l5 5"/></svg>
+        </button>
+        <button class="tool" data-tool="lasso" aria-label="Lasso select" title="Lasso (L)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="9.5" rx="8" ry="5.5" stroke-dasharray="3 2.4"/><path d="M8 14.5c-1 2-.5 4 1.5 5"/></svg>
+        </button>
+        <button class="tool" data-tool="text" aria-label="Text" title="Text (T)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>
+        </button>
+        <button class="tool" data-tool="space" aria-label="Insert or remove space" title="Insert space (S): drag down to add room, up to remove it">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16" stroke-dasharray="2.5 2.5"/><path d="M12 3v6M9.5 6.5L12 9l2.5-2.5M12 21v-6M9.5 17.5L12 15l2.5 2.5"/></svg>
+        </button>
+      </div>
+      <div class="divider" aria-hidden="true"></div>
+      <div id="tool-options" class="tool-group" aria-label="Tool options"></div>
+      <div id="colors" class="tool-group" aria-label="Colors"></div>
+      <div id="sizes-divider" class="divider" aria-hidden="true"></div>
+      <div id="sizes" class="tool-group" aria-label="Sizes"></div>
+      <div class="divider" aria-hidden="true"></div>
+      <div class="tool-group">
+        <button id="insert-image" class="tool" aria-label="Insert picture" title="Insert picture">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>
+        </button>
+        <button id="ruler-btn" class="tool" aria-label="Ruler" aria-pressed="false" title="Ruler (R)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="8" width="19" height="8" rx="1.5" transform="rotate(-30 12 12)"/><path d="M8.2 9.7l1 1.7M11.2 8l1 1.7M14.2 6.3l1 1.7" transform="rotate(0)"/></svg>
+        </button>
+      </div>
+      <button id="toolbar-collapse" class="tool collapse-btn" aria-label="Show fewer tools" aria-expanded="true" title="Collapse / expand">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+    </div>
+
+    <div class="editor-body">
+      <aside id="page-panel" class="page-panel" aria-label="Pages" hidden>
+        <ol id="page-list" class="page-list"></ol>
+        <button id="panel-add-page" class="add-page">+ Add page</button>
+      </aside>
+      <div id="canvas-wrap" class="canvas-wrap">
+        <div id="selection-bar" class="selection-bar" hidden>
+          <button id="sel-copy">Copy</button>
+          <button id="sel-duplicate">Duplicate</button>
+          <button id="sel-lock" title="Lock in place: can't be selected or erased until unlocked">Lock</button>
+          <button id="sel-delete" class="danger">Delete</button>
+        </div>
+        <div id="paste-bar" class="selection-bar" hidden>
+          <button id="paste-btn">Paste</button>
+        </div>
+        <div id="loop-bar" class="selection-bar" hidden>
+          <button id="loop-select">Select</button>
+        </div>
+        <div id="text-bar" class="selection-bar" hidden>
+          <button id="text-done">Done</button>
+          <button id="text-delete" class="danger">Delete text box</button>
+        </div>
+        <textarea id="text-editor" class="text-editor" hidden aria-label="Text box" spellcheck="true" placeholder="Type, or write with Apple Pencil"></textarea>
+        <div id="page-indicator" class="page-indicator" aria-live="polite"></div>
+        <button id="zoom-indicator" class="zoom-indicator" title="Reset zoom"></button>
+      </div>
+    </div>
+
+    <div id="paper-menu" class="popover" hidden>
+      <h2>Template</h2>
+      <div id="paper-templates" class="template-grid"></div>
+      <h2>Paper color</h2>
+      <div id="paper-colors" class="swatch-row"></div>
+    </div>
+
+    <div id="more-menu" class="popover popover-narrow" hidden>
+      <button id="export-pdf" class="menu-row">Export PDF…</button>
+      <button id="paste-menu" class="menu-row">Paste</button>
+      <button id="unlock-all" class="menu-row">Unlock everything here</button>
+      <label class="menu-row whiteboard-only"><input type="checkbox" id="minimap-toggle"> Minimap</label>
+      <h2>Pencil gestures</h2>
+      <label class="menu-row"><input type="checkbox" id="gesture-scribble"> Scribble to erase</label>
+      <label class="menu-row"><input type="checkbox" id="gesture-circle"> Circle to select</label>
+      <label class="menu-row"><input type="checkbox" id="gesture-double"> Double-tap to undo / redo</label>
+      <label class="menu-row"><input type="checkbox" id="finger-draw"> Draw with finger</label>
+      <button id="show-shortcuts" class="menu-row">Shortcuts &amp; gestures</button>
+      <h2>Appearance</h2>
+      <div class="theme-picker" data-theme-picker></div>
+    </div>
+
+    <div id="size-menu" class="popover popover-narrow pen-settings size-menu" hidden>
+      <h2 id="size-menu-title">Size</h2>
+      <div id="size-menu-body"></div>
+    </div>
+
+    <div id="style-menu" class="popover pen-settings style-menu" hidden>
+      <h2>Pen</h2>
+      <div id="style-menu-body"></div>
+    </div>
+
+    <div id="color-menu" class="popover popover-narrow pen-settings" hidden>
+      <h2>Colors</h2>
+      <div id="color-menu-body" class="swatch-row"></div>
+    </div>
+
+    <div id="pen-settings" class="popover popover-narrow pen-settings" hidden>
+      <h2 id="pen-settings-title">Pen settings</h2>
+      <div id="pen-settings-body"></div>
+    </div>
+  </main>
+
+  <dialog id="text-dialog">
+    <form method="dialog">
+      <h2 id="text-dialog-title"></h2>
+      <input id="text-dialog-input" type="text" maxlength="200" autocomplete="off" aria-labelledby="text-dialog-title">
+      <!-- OK comes first so Enter submits it; CSS shows it on the right. -->
+      <div class="dialog-buttons">
+        <button id="text-dialog-ok" value="ok" class="primary"></button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="new-doc-dialog">
+    <form method="dialog">
+      <h2>New notebook</h2>
+      <label class="field">Name <input id="new-doc-title" type="text" maxlength="200" autocomplete="off" value="Untitled"></label>
+      <label class="field">Type
+        <select id="new-doc-kind">
+          <option value="notebook">Notebook (pages)</option>
+          <option value="whiteboard">Whiteboard (infinite canvas)</option>
+        </select>
+      </label>
+      <label class="field notebook-field">Page size <select id="new-doc-size"></select></label>
+      <label class="field notebook-field">Paper <select id="new-doc-paper"></select></label>
+      <div class="dialog-buttons">
+        <button value="ok" class="primary">Create</button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="choice-dialog">
+    <form method="dialog">
+      <h2 id="choice-title"></h2>
+      <select id="choice-select" class="field-select" aria-labelledby="choice-title"></select>
+      <div class="dialog-buttons">
+        <button id="choice-ok" value="ok" class="primary"></button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog">
+    <form method="dialog">
+      <h2 id="confirm-dialog-title"></h2>
+      <p id="confirm-dialog-message"></p>
+      <div class="dialog-buttons">
+        <button id="confirm-dialog-ok" value="ok" class="danger"></button>
+        <button value="cancel" autofocus>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="shortcuts-dialog" class="shortcuts">
+    <form method="dialog">
+      <h2>Shortcuts &amp; gestures</h2>
+      <div class="shortcut-columns">
+        <section>
+          <h3>Gestures</h3>
+          <dl>
+            <dt>Two-finger tap</dt><dd>Undo</dd>
+            <dt>Three-finger tap</dt><dd>Redo</dd>
+            <dt>One finger drag</dt><dd>Scroll the pages</dd>
+            <dt>Pinch</dt><dd>Zoom</dd>
+            <dt>Hold at end of a stroke</dt><dd>Turn it into a line, circle, triangle or box</dd>
+            <dt>Lasso, then drag inside</dt><dd>Move selection</dd>
+            <dt>Drag the round handle</dt><dd>Resize selection</dd>
+            <dt>Lasso tap on empty space</dt><dd>Paste</dd>
+            <dt>Drag / twist the ruler</dt><dd>Move / rotate it; draw along its edge</dd>
+            <dt>Scribble over writing</dt><dd>Erase it</dd>
+            <dt>Circle around writing</dt><dd>Tap “Select” to select it</dd>
+            <dt>Line or arrow between shapes</dt><dd>Hold to snap; it follows the shapes when moved</dd>
+            <dt>Write in a text box</dt><dd>iPadOS turns handwriting into text (Settings › Apple Pencil › Scribble)</dd>
+          </dl>
+        </section>
+        <section>
+          <h3>Keyboard</h3>
+          <dl>
+            <dt>⌘Z / ⇧⌘Z</dt><dd>Undo / redo (Ctrl on Windows)</dd>
+            <dt>P · H · E · L · T · S</dt><dd>Pen · Highlighter · Eraser · Lasso · Text · Space</dd>
+            <dt>1 – 6</dt><dd>Same tools</dd>
+            <dt>I</dt><dd>Eyedropper: pick a colour from the page</dd>
+            <dt>R</dt><dd>Show / hide ruler</dd>
+            <dt>[ and ]</dt><dd>Smaller / bigger size</dd>
+            <dt>⌘C · ⌘X · ⌘V</dt><dd>Copy · cut · paste</dd>
+            <dt>⌘D</dt><dd>Duplicate selection</dd>
+            <dt>Delete</dt><dd>Delete selection</dd>
+            <dt>Esc</dt><dd>Clear selection</dd>
+            <dt>⌘+ / ⌘− / ⌘0</dt><dd>Zoom in / out / fit width</dd>
+            <dt>⇧⌘N</dt><dd>Add page</dd>
+            <dt>⌘E</dt><dd>Export PDF</dd>
+            <dt>?</dt><dd>This list</dd>
+          </dl>
+        </section>
+      </div>
+      <div class="dialog-buttons"><button value="ok" class="primary">Done</button></div>
+    </form>
+  </dialog>
+
+  <input id="pdf-input" type="file" accept="application/pdf,.pdf" hidden>
+  <input id="image-input" type="file" accept="image/*" hidden>
+  <input id="restore-input" type="file" accept="application/json,.json" hidden>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
