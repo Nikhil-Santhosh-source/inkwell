@@ -286,6 +286,22 @@ function coverHue(id) {
 
 let cardMenuDoc = null;
 
+// Covers are drawn once per version of a notebook (and redrawn when its
+// pages change), so searching and sorting don't redraw every cover.
+const coverCache = new Map(); // doc id → { key, canvas }
+
+async function coverFor(doc) {
+  const key = `${doc.modifiedAt}:${doc.pageIds[0]}`;
+  const cached = coverCache.get(doc.id);
+  if (cached?.key === key) return cached.canvas;
+  const page = await store.getPage(doc.pageIds[0]).catch(() => null);
+  if (!page) return null;
+  const canvas = document.createElement('canvas');
+  renderThumbnail(canvas, page, 120);
+  coverCache.set(doc.id, { key, canvas });
+  return canvas;
+}
+
 function openCardMenu(doc, button) {
   const menu = $('card-menu');
   if (!menu.hidden && cardMenuDoc?.id === doc.id) {
@@ -323,7 +339,7 @@ async function renderLibrary() {
   const docs = sortDocs((await store.listDocuments())
     .filter((d) => library.folderId === null || d.folderId === library.folderId)
     .filter((d) => !query || d.title.toLocaleLowerCase().includes(query)));
-  const covers = await Promise.all(docs.map((doc) => store.getPage(doc.pageIds[0]).catch(() => null)));
+  const covers = await Promise.all(docs.map(coverFor));
   docList.replaceChildren(...docs.map((doc, i) => {
     const item = document.createElement('li');
     item.className = 'doc-card';
@@ -333,11 +349,7 @@ async function renderLibrary() {
     const cover = document.createElement('div');
     cover.className = `doc-cover${whiteboard ? ' whiteboard' : ''}`;
     cover.style.setProperty('--cover-h', coverHue(doc.id));
-    if (covers[i]) {
-      const canvas = document.createElement('canvas');
-      renderThumbnail(canvas, covers[i], 120);
-      cover.append(canvas);
-    }
+    if (covers[i]) cover.append(covers[i]);
     const badge = document.createElement('span');
     badge.className = 'doc-badge';
     badge.textContent = whiteboard ? 'Board' : `${doc.pageIds.length} ${doc.pageIds.length === 1 ? 'page' : 'pages'}`;
@@ -579,10 +591,15 @@ function refreshEditor() {
 }
 
 // The page sidebar is rebuilt shortly after edits stop, not after every stroke.
+// Thumbnails are redrawn once writing pauses: never while the Pencil is
+// down, so redrawing them can't stutter the next stroke.
 let panelTimer = null;
 function schedulePagePanel() {
   clearTimeout(panelTimer);
-  panelTimer = setTimeout(renderPagePanel, 250);
+  panelTimer = setTimeout(() => {
+    if (editor?.view.action) schedulePagePanel();
+    else renderPagePanel();
+  }, 600);
 }
 
 function revert(entry, cmd) {

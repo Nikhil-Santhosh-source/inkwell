@@ -50,7 +50,9 @@ const UNSNAP_DISTANCE = 12; // CSS px: moving on this far after a snap undoes it
 const PREDICT_MS = 12;
 const PREDICT_MAX = 14; // CSS px: never guess further than this
 const HANDLE_SIZE = 22; // CSS px hit area of the selection's resize handle
-const SETTLE_TIME = 140; // ms after panning/zooming stops before the full-quality redraw
+const SETTLE_TIME = 140; // ms after trackpad/minimap movement stops before the full-quality redraw
+const REFILL_TIME = 120; // ms: while moving, redraw at most this often when the view runs past what was drawn
+const GESTURE_SETTLE_TIME = 350; // the same while fingers rest on the screen mid-pinch (redrawn at once when they lift)
 const NONE = new Set();
 
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -86,6 +88,10 @@ export class DocumentView {
     container.append(this.base, this.wet, this.minimap);
     this.minimapCtx = this.minimap.getContext('2d');
     this.baseCtx = this.base.getContext('2d', { alpha: false });
+    // While the view moves, the base layer is moved and scaled by the GPU
+    // (a CSS transform) instead of being repainted; see viewChanged.
+    this.base.style.transformOrigin = '0 0';
+    this.base.style.willChange = 'transform';
     this.wetCtx = this.wet.getContext('2d', { desynchronized: true });
 
     this.pages = [];
@@ -352,11 +358,11 @@ export class DocumentView {
   }
 
   // After a pan or zoom. While fingers, the trackpad or the minimap are
-  // still moving the view, frames reuse a snapshot of the last full render
-  // (scaled and shifted), which costs the same however much is on the page;
-  // the full redraw happens once the movement pauses.
+  // still moving the view, the last full render is moved and scaled on the
+  // GPU (a CSS transform on the base canvas): no repainting at all, however
+  // much is on the page. The sharp redraw happens once the movement ends.
   viewChanged() {
-    if (!(this.gesture || this.wheeling || this.minimapDragging) || !this.snapshot) {
+    if (!(this.gesture || this.wheeling || this.minimapDragging) || !this.rendered) {
       this.invalidate();
       return;
     }
@@ -364,7 +370,15 @@ export class DocumentView {
     this.requestFrame();
     this.updateCurrentPage();
     clearTimeout(this.settleTimer);
-    this.settleTimer = setTimeout(() => this.invalidate(), SETTLE_TIME);
+    this.settleTimer = setTimeout(() => this.invalidate(), this.gesture ? GESTURE_SETTLE_TIME : SETTLE_TIME);
+  }
+
+  // Shows the last full render where the current view puts it.
+  transformBase() {
+    const r = this.rendered;
+    const k = this.scale / r.scale;
+    this.base.style.transform = `matrix(${k}, 0, 0, ${k}, ${this.offsetX - r.offsetX * k}, ${this.offsetY - r.offsetY * k})`;
+    this.baseMoved = true;
   }
 
   zoomBy(factor) {
@@ -440,7 +454,7 @@ export class DocumentView {
   }
 
   requestFrame() {
-    if (!this.frame) this.frame = requestAnimationFrame(() => this.renderFrame());
+    if (!this.frame && !this.inFrame) this.frame = requestAnimationFrame(() => this.renderFrame());
   }
 
   // Transform for drawing page `index` in page units.
@@ -452,47 +466,38 @@ export class DocumentView {
   renderFrame() {
     this.frame = 0;
     if (!this.pages.length) return;
+    this.inFrame = true; // view changes made here are drawn in this frame
+    if (this.gesturePending) {
+      this.gesturePending = false;
+      this.stepGesture();
+    }
+    this.inFrame = false;
     if (this.baseDirty) {
       this.baseDirty = false;
       this.viewDirty = false;
       this.renderBase();
-      this.takeSnapshot();
       this.renderMinimap();
     } else if (this.viewDirty) {
       this.viewDirty = false;
-      this.renderFromSnapshot();
+      if (this.needsRefill()) this.renderBase();
+      else this.transformBase();
       this.renderMinimap();
     }
     this.renderWet();
   }
 
-  // Keeps a copy of the base layer and the view it was drawn at.
-  takeSnapshot() {
-    if (!this.snapshotCanvas) this.snapshotCanvas = document.createElement('canvas');
-    const snap = this.snapshotCanvas;
-    if (snap.width !== this.base.width || snap.height !== this.base.height) {
-      snap.width = this.base.width;
-      snap.height = this.base.height;
-    }
-    const ctx = snap.getContext('2d');
-    ctx.drawImage(this.base, 0, 0);
-    this.snapshot = { scale: this.scale, offsetX: this.offsetX, offsetY: this.offsetY };
-  }
-
-  // Draws the snapshot moved and scaled to the current view.
-  renderFromSnapshot() {
-    this.baseGen = (this.baseGen ?? 0) + 1;
-    const ctx = this.baseCtx;
-    const snap = this.snapshot;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = this.infinite
-      ? paperColor(getPaper(this.pages[0]).color).fill
-      : this.deskColor();
-    ctx.fillRect(0, 0, this.base.width, this.base.height);
-    const k = this.scale / snap.scale;
-    ctx.setTransform(k, 0, 0, k, this.dpr * (this.offsetX - snap.offsetX * k), this.dpr * (this.offsetY - snap.offsetY * k));
-    ctx.drawImage(this.snapshotCanvas, 0, 0);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // While the view moves, true when it has run past the edges of the last
+  // full render (scrolling into a part that was never drawn), and a redraw
+  // hasn't just happened.
+  needsRefill() {
+    if (performance.now() - (this.renderedAt ?? 0) < REFILL_TIME) return false;
+    const r = this.rendered;
+    const k = this.scale / r.scale;
+    const left = this.offsetX - r.offsetX * k;
+    const top = this.offsetY - r.offsetY * k;
+    const mx = this.viewW * 0.1;
+    const my = this.viewH * 0.1;
+    return left > mx || top > my || left + this.viewW * k < this.viewW - mx || top + this.viewH * k < this.viewH - my;
   }
 
   // The part of the view over page `index`, in that page's units (for skipping
@@ -550,6 +555,14 @@ export class DocumentView {
 
   renderBase() {
     this.baseGen = (this.baseGen ?? 0) + 1; // anything drawn onto the base layer before is gone
+    this.rendered = { scale: this.scale, offsetX: this.offsetX, offsetY: this.offsetY };
+    this.renderedAt = performance.now();
+    if (this.baseMoved) {
+      this.base.style.transform = '';
+      this.baseMoved = false;
+    }
+    // What shows around the moved base layer while zooming out.
+    this.container.style.background = this.infinite ? paperColor(getPaper(this.pages[0]).color).fill : '';
     if (this.infinite) {
       this.renderWhiteboard();
       return;
@@ -710,7 +723,7 @@ export class DocumentView {
     const toArray = (p) => (p.azimuth === undefined ? [p.x, p.y, p.pressure] : [p.x, p.y, p.pressure, p.azimuth, p.altitude]);
     const stroke = { ...action.pen, points: action.points.map(toArray) };
     if (action.shape) stroke.shape = action.shape;
-    const solid = strokeTool(stroke) === 'pen' && strokeStyle(stroke) !== 'pencil' && !action.snapped;
+    const solid = strokeTool(stroke) === 'pen' && strokeStyle(stroke) !== 'pencil' && !action.snapped && !this.baseMoved;
     if (!solid) {
       stroke.points = [...stroke.points, ...action.predicted.map(toArray)];
       fillStroke(ctx, stroke, traceStroke(new Path2D(), stroke, inkCurve(stroke, 2.5)));
@@ -1397,7 +1410,15 @@ export class DocumentView {
     touch.y = local.y;
     if (Math.hypot(touch.x - touch.startX, touch.y - touch.startY) > MOVE_SLOP) this.gesture.moved = true;
     if (!this.gesture.moved) return;
+    // Each finger reports separately; moving the view per report would use
+    // one finger's new position with the other's old one (a jittery zoom).
+    // The view follows all fingers together, once per frame.
+    this.gesturePending = true;
+    this.requestFrame();
+  }
 
+  stepGesture() {
+    if (!this.gesture || !this.touches.size) return;
     const pts = [...this.touches.values()];
     const centroid = {
       x: pts.reduce((sum, p) => sum + p.x, 0) / pts.length,
@@ -1431,6 +1452,11 @@ export class DocumentView {
     if (this.touches.size > 0) return;
     const g = this.gesture;
     this.gesture = null;
+    if (g.moved && this.baseMoved) {
+      // Fingers lifted: sharpen now rather than after a pause.
+      clearTimeout(this.settleTimer);
+      this.invalidate();
+    }
     const now = performance.now();
     const isTap = !cancelled && !g.moved && now - g.start < TAP_TIME && now - this.lastPenUp > PEN_QUIET_TIME;
     if (!isTap || (g.maxTouches !== 2 && g.maxTouches !== 3)) return;
