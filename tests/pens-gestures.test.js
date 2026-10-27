@@ -315,3 +315,31 @@ test('zoomed in, small writing keeps its detail; zoomed out, jitter is still smo
   const plain = inkCurve({ ...pen(), points: loop, res: 1 });
   assert.ok(plain.length > 0);
 });
+
+test('scribbles are recognised in any direction, handwriting is not', () => {
+  // Up and down while moving along a word (wider than tall).
+  const upDown = pts((t) => ({ x: 100 + t * 90, y: 100 + Math.sin(t * Math.PI * 16) * 18 }), 160);
+  assert.ok(isScribble(upDown), 'vertical zigzag across a word');
+  // Side to side, a short quick one (two and a half back-and-forths).
+  const quick = pts((t) => ({ x: 100 + Math.sin(t * Math.PI * 5) * 40, y: 100 + t * 12 }), 60);
+  assert.ok(isScribble(quick), 'short scribble');
+  // Diagonal.
+  const diagonal = pts((t) => { const a = Math.sin(t * Math.PI * 12) * 35; return { x: 100 + a + t * 20, y: 100 + a + t * 5 }; }, 140);
+  assert.ok(isScribble(diagonal), 'diagonal scribble');
+  // Handwriting: "mmmm" and "minimum" style up-downs move along by about a letter each.
+  const mmm = pts((t) => ({ x: 100 + t * 160, y: 100 - Math.abs(Math.sin(t * Math.PI * 8)) * 16 }), 200);
+  assert.ok(!isScribble(mmm), 'mmm is writing');
+  const wave = pts((t) => ({ x: 100 + t * 300, y: 100 + Math.sin(t * Math.PI * 10) * 12 }), 200);
+  assert.ok(!isScribble(wave), 'a wavy line is writing');
+});
+
+test('a scribble over part of a long stroke erases it', () => {
+  // One long cursive stroke; the scribble covers about a quarter of it.
+  const long = createStroke(pts((t) => ({ x: 100 + t * 400, y: 200 + Math.sin(t * 40) * 8, pressure: 0.5 }), 200), pen());
+  const part = pts((t) => ({ x: 120 + t * 80, y: 200 + Math.sin(t * Math.PI * 16) * 20 }), 160);
+  assert.ok(isScribble(part));
+  assert.deepEqual(strokesUnderScribble([long], part), [long.id]);
+  // Merely crossing it once with a line doesn't.
+  const across = pts((t) => ({ x: 300, y: 150 + t * 100 }), 40);
+  assert.deepEqual(strokesUnderScribble([long], across), []);
+});

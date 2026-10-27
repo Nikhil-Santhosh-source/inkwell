@@ -1125,6 +1125,7 @@ export class DocumentView {
     a.holdAnchor = point;
     a.holdTimer = setTimeout(() => {
       if (this.action !== a || a.snapped || a.snap) return;
+      if (this.gestures.scribble && isScribble(a.points)) return; // a scribble that paused is still a scribble
       const shape = recognizeShape(a.points);
       if (!shape) return;
       a.drawn = a.points; // kept in case the Pencil moves on: then it wasn't a hold
