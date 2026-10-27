@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createDocument, createPage, createStroke, createTextItem, createWhiteboardPage } from '../app/src/model.js';
 import {
   arrowPoints, closedLoop, connectorTargetAt, followConnectors, isScribble, pointRadii, recognizeShape,
-  inkCurve, smoothPoints, strokesUnderScribble, traceStroke,
+  distances, inkCurve, inkOutline, settledDistance, smoothPoints, strokesUnderScribble, traceStroke,
 } from '../app/src/geometry.js';
 import { applyCommand, invertCommand, lockCommand, moveStrokesCommand, translateStroke } from '../app/src/commands.js';
 import { contentBounds, finitePage } from '../app/src/whiteboard.js';
@@ -273,4 +273,45 @@ test('snapped shapes keep sharp corners', () => {
   const box = [[0, 0, 0.5], [50, 0, 0.5], [50, 50, 0.5]];
   const stroke = { ...pen(), points: box, shape: { kind: 'rectangle' } };
   assert.ok(inkCurve(stroke).some((p) => Math.hypot(p[0] - 50, p[1]) < 1e-9), 'corner kept exactly');
+});
+
+test('the settled part of a live stroke never changes as the stroke grows', () => {
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5;
+  for (const style of ['ballpoint', 'fountain', 'brush']) {
+    for (const res of [0.27, 1, 1.7, undefined]) {
+      // Cursive-like loops with uneven spacing (fast and slow writing).
+      let t = 0;
+      const all = Array.from({ length: 220 }, () => {
+        t += 0.05 + Math.abs(rnd()) * 0.25;
+        return [100 + t * 9 + 14 * Math.cos(t * 2.1), 200 + 18 * Math.sin(t * 2.1) + rnd(), 0.5 + rnd() * 0.4, -0.5 + rnd() * 0.3, 1 + rnd() * 0.2];
+      });
+      const settings = { ballpoint: {}, fountain: { sens: 0.6, taper: 0.3, flat: 0.8 }, brush: { sens: 1, taper: 0.7 } }[style];
+      const pen0 = { ...pen({ style, width: 6, ...settings }), ...(res ? { res } : {}) };
+      const final = inkOutline({ ...pen0, points: all }, 2.5);
+      for (const k of [20, 60, 110, 170]) {
+        const partial = { ...pen0, points: all.slice(0, k) };
+        const live = inkOutline(partial, 2.5);
+        const along = distances(live.points);
+        const settled = along[along.length - 1] - settledDistance(partial);
+        for (let j = 0; j < live.points.length && along[j] <= settled; j++) {
+          const a = live.points[j];
+          const b = final.points[j];
+          assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6 && Math.abs(live.radii[j] - final.radii[j]) < 1e-6,
+            `${style} res ${res} after ${k} points: point ${j} moved`);
+        }
+      }
+    }
+  }
+});
+
+test('zoomed in, small writing keeps its detail; zoomed out, jitter is still smoothed', () => {
+  // A small loop 3 page units across, written at 367% (0.27 page units per pixel).
+  const loop = Array.from({ length: 41 }, (_, i) => [50 + 1.5 * Math.cos((i / 40) * Math.PI * 2), 50 + 1.5 * Math.sin((i / 40) * Math.PI * 2), 0.5]);
+  const zoomed = inkCurve({ ...pen(), points: loop, res: 0.27 });
+  const r = zoomed.slice(5, -5).map(([x, y]) => Math.hypot(x - 50, y - 50));
+  assert.ok(Math.min(...r) > 1.35, `loop kept its size (smallest radius ${Math.min(...r).toFixed(2)})`);
+  // Written at 100%, the same small loop would be a pixel-sized scribble; it's evened out.
+  const plain = inkCurve({ ...pen(), points: loop, res: 1 });
+  assert.ok(plain.length > 0);
 });

@@ -115,7 +115,8 @@ function round(value, digits) {
 // points: [{ x, y, pressure, azimuth?, altitude? }] in page units. Stored
 // compactly as [x, y, p], or [x, y, p, azimuth, altitude] when the Pencil
 // reports its angle. Points are kept inside the page unless it's a whiteboard.
-// pen: { tool, color, width, style?, sens?, taper?, flat? }
+// pen: { tool, color, width, style?, sens?, taper?, flat?, res? }
+// res: page units per CSS pixel when written (the zoom), which smoothing uses.
 export function createStroke(points, pen = DEFAULT_PEN, page = { width: PAGE_WIDTH, height: PAGE_HEIGHT }) {
   if (!Array.isArray(points) || points.length === 0) {
     throw new Error('A stroke needs at least one point');
@@ -135,6 +136,7 @@ export function createStroke(points, pen = DEFAULT_PEN, page = { width: PAGE_WID
   for (const key of ['sens', 'taper', 'flat']) {
     if (Number.isFinite(pen[key])) stroke[key] = round(pen[key], 2);
   }
+  if (Number.isFinite(pen.res) && pen.res > 0) stroke.res = round(pen.res, 3);
   return stroke;
 }
 

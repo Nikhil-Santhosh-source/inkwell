@@ -91,8 +91,8 @@ export function lerpPoint(a, b, t) {
 // parameterisation avoids loops and overshoot at sharp turns. Shaky hands
 // are handled by the stabilization setting instead.
 // points: [[x, y, p, ...]]. Returns a new array in the same format.
-export function smoothPoints(points, maxStep = 1.5) {
-  const pts = mergeNearPoints(points);
+export function smoothPoints(points, maxStep = 1.5, gap = MERGE_GAP) {
+  const pts = mergeNearPoints(points, gap);
   if (pts.length < 3) return pts;
   const out = [pts[0]];
   for (let i = 0; i < pts.length - 1; i++) {
@@ -114,21 +114,62 @@ export function smoothPoints(points, maxStep = 1.5) {
   return out;
 }
 
-// How far (page units) the Pencil's jitter is averaged over. Measured on
-// noisy 240 Hz input: wobbles between neighbouring points drop from 55° to
-// under 10°, while a small letter (8 units across) shrinks by under 0.4 units.
-const INK_STEADY = 2.5;
+// Smoothing works in screen pixels at the zoom the stroke was written at:
+// the Pencil's jitter is a fraction of a pixel on screen whatever the zoom,
+// so zoomed in it's a tiny distance on the page (and small writing keeps
+// its detail), zoomed out a larger one. stroke.res is page units per CSS
+// pixel when it was written; strokes from before it existed use INK_RES.
+const INK_STEADY_PX = 1.5; // jitter averaged over this many CSS px of the stroke
+const INK_MERGE_PX = 0.7; // repeated samples closer than this are merged
+const INK_STEP_PX = 2.5; // the smoothed curve has a point at least this often
+const INK_RES = 1.6; // older strokes: what these used to be in page units (2.5, 1.2)
+
+function inkRes(stroke) {
+  return Number.isFinite(stroke.res) && stroke.res > 0 ? stroke.res : INK_RES;
+}
 
 // The centre line of a stroke as drawn: the Pencil's points with their
 // sensor jitter evened out (see steadyPoints), then smoothed into a curve.
 // Snapped shapes keep their exact corners.
 export function inkCurve(stroke, maxStep = 1.5) {
   if (stroke.shape) return smoothPoints(stroke.points, maxStep);
-  return smoothPoints(steadyPoints(mergeNearPoints(stroke.points), INK_STEADY), maxStep);
+  const res = inkRes(stroke);
+  const gap = INK_MERGE_PX * res;
+  const step = Math.min(maxStep, INK_STEP_PX * res);
+  return smoothPoints(steadyPoints(mergeNearPoints(stroke.points, gap), INK_STEADY_PX * res), step, gap);
+}
+
+// The stroke's centre line and the ink's radius at each point of it.
+export function inkOutline(stroke, maxStep = 1.5) {
+  const points = inkCurve(stroke, maxStep);
+  return { points, radii: steadyRadii(points, pointRadii(stroke, points), radiusSigma(stroke)) };
+}
+
+function radiusSigma(stroke) {
+  return Math.max(1, stroke.width * 0.4);
+}
+
+// While a stroke is being written, smoothing keeps adjusting its last part
+// as new points arrive. This is how far back from the end (page units along
+// the stroke) that can reach; everything before it is final and can be
+// drawn once. Generous on purpose: being early would leave a visible seam.
+export function settledDistance(stroke) {
+  const pts = stroke.points;
+  let gap = 0;
+  for (let i = Math.max(1, pts.length - 12); i < pts.length; i++) {
+    gap = Math.max(gap, Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  }
+  const taper = (stroke.taper ?? 0) > 0 ? Math.max(6, stroke.width * 8) : 0;
+  return 3 * INK_STEADY_PX * inkRes(stroke) // point smoothing
+    + 3 * gap // the curve between two points also depends on the next two
+    + 3 * radiusSigma(stroke) // width smoothing
+    + Math.max(1, stroke.width * 0.25) // fountain nib direction
+    + taper // the end of the stroke narrows
+    + 4; // margin
 }
 
 // Distance travelled along a polyline at each point.
-function distances(points) {
+export function distances(points) {
   const along = [0];
   for (let i = 1; i < points.length; i++) {
     along.push(along[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]));
@@ -187,13 +228,13 @@ function steadyRadii(points, radii, sigma) {
 // kept, the pressure is the larger of the two. The last point is always kept.
 const MERGE_GAP = 1.2; // page units
 
-export function mergeNearPoints(points) {
+export function mergeNearPoints(points, gap = MERGE_GAP) {
   if (points.length < 3) return points.slice();
   const out = [points[0]];
   for (let i = 1; i < points.length; i++) {
     const p = points[i];
     const last = out[out.length - 1];
-    const close = Math.hypot(p[0] - last[0], p[1] - last[1]) < MERGE_GAP;
+    const close = Math.hypot(p[0] - last[0], p[1] - last[1]) < gap;
     if (!close) {
       out.push(p);
     } else if (i === points.length - 1) {
@@ -234,13 +275,18 @@ function centripetal(p0, p1, p2, p3, t) {
 // `path` is anything with moveTo/lineTo/arc/closePath, such as a Path2D.
 
 export function traceStroke(path, stroke, points = inkCurve(stroke)) {
-  const radii = steadyRadii(points, pointRadii(stroke, points), Math.max(1, stroke.width * 0.4));
+  return traceOutline(path, points, steadyRadii(points, pointRadii(stroke, points), radiusSigma(stroke)));
+}
+
+// Traces the outline between points `from` and `to` (inclusive) of a centre
+// line with its radii, so a stroke can be drawn in pieces.
+export function traceOutline(path, points, radii, from = 0, to = points.length - 1) {
   const circle = (x, y, r) => {
     path.moveTo(x + r, y);
     path.arc(x, y, r, 0, Math.PI * 2, false);
   };
-  circle(points[0][0], points[0][1], radii[0]);
-  for (let i = 1; i < points.length; i++) {
+  circle(points[from][0], points[from][1], radii[from]);
+  for (let i = from + 1; i <= to; i++) {
     const [ax, ay] = points[i - 1];
     const [bx, by] = points[i];
     const ra = radii[i - 1];

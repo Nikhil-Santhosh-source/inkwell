@@ -12,12 +12,12 @@
 //                               two-finger tap = undo, three = redo
 //   large contacts (palms), and any touch while the Pencil is down → ignored
 
-import { createStroke, getItems, getPaper, newId } from './model.js';
+import { createStroke, getItems, getPaper, newId, strokeStyle, strokeTool } from './model.js';
 import {
   RULER_LENGTH, RULER_WIDTH, addArrowhead, closedLoop, connectorTargetAt, eraseFromStroke, isConnectorShape,
   isScribble, itemAt, itemBounds,
-  inkCurve, itemsInLasso, onRuler, projectToRuler, recognizeShape, rulerSnapLine, strokeAt, strokeHitsCircle,
-  strokeRadius, strokesInLasso, strokesUnderScribble, traceStroke, unionBounds,
+  distances, inkCurve, inkOutline, itemsInLasso, onRuler, projectToRuler, recognizeShape, rulerSnapLine, settledDistance,
+  strokeAt, strokeHitsCircle, strokeRadius, strokesInLasso, strokesUnderScribble, traceOutline, traceStroke, unionBounds,
 } from './geometry.js';
 import {
   addStrokesCommand, moveStrokesCommand, removeStrokesCommand, replaceStrokesCommand, updateCommand,
@@ -44,6 +44,11 @@ const SHAPE_HOLD_TIME = 550; // ms the Pencil rests at the end of a stroke to tu
 // lot of hand movement, and slow writing was being taken for a hold.
 const SHAPE_HOLD_SLOP = 4; // CSS px of wobble allowed while holding
 const UNSNAP_DISTANCE = 12; // CSS px: moving on this far after a snap undoes it (still writing)
+// When the browser doesn't predict where the Pencil is going (Safari often
+// doesn't), live ink is carried on along its current motion for about this
+// long, so it keeps up with the tip instead of trailing a frame behind.
+const PREDICT_MS = 12;
+const PREDICT_MAX = 14; // CSS px: never guess further than this
 const HANDLE_SIZE = 22; // CSS px hit area of the selection's resize handle
 const SETTLE_TIME = 140; // ms after panning/zooming stops before the full-quality redraw
 const NONE = new Set();
@@ -476,6 +481,7 @@ export class DocumentView {
 
   // Draws the snapshot moved and scaled to the current view.
   renderFromSnapshot() {
+    this.baseGen = (this.baseGen ?? 0) + 1;
     const ctx = this.baseCtx;
     const snap = this.snapshot;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -543,6 +549,7 @@ export class DocumentView {
   }
 
   renderBase() {
+    this.baseGen = (this.baseGen ?? 0) + 1; // anything drawn onto the base layer before is gone
     if (this.infinite) {
       this.renderWhiteboard();
       return;
@@ -687,6 +694,58 @@ export class DocumentView {
     this.onZoomChange?.(this.zoom);
   }
 
+  // The stroke being written. A lightweight preview (no ids or rounding)
+  // with slightly coarser curve steps; the saved stroke gets the full
+  // treatment on lift.
+  //
+  // Redrawing the whole stroke every frame costs more the longer it gets,
+  // so for solid ink the part that has settled (smoothing no longer changes
+  // it; see geometry.settledDistance) is drawn once, onto the base layer,
+  // and only the last bit is redrawn each frame. Every frame then costs the
+  // same however long the stroke. Translucent ink (highlighter, pencil)
+  // would look darker where the two parts overlap, so it's redrawn whole.
+  // The base layer is redrawn when the stroke is saved, which replaces the
+  // settled part with the saved stroke.
+  renderLiveInk(ctx, action, page) {
+    const toArray = (p) => (p.azimuth === undefined ? [p.x, p.y, p.pressure] : [p.x, p.y, p.pressure, p.azimuth, p.altitude]);
+    const stroke = { ...action.pen, points: action.points.map(toArray) };
+    if (action.shape) stroke.shape = action.shape;
+    const solid = strokeTool(stroke) === 'pen' && strokeStyle(stroke) !== 'pencil' && !action.snapped;
+    if (!solid) {
+      stroke.points = [...stroke.points, ...action.predicted.map(toArray)];
+      fillStroke(ctx, stroke, traceStroke(new Path2D(), stroke, inkCurve(stroke, 2.5)));
+      return;
+    }
+    // Settled is judged without the predicted points, which are only a guess.
+    const settled = inkOutline(stroke, 2.5);
+    const along = distances(settled.points);
+    const until = along[along.length - 1] - settledDistance(stroke);
+    const live = action.live?.gen === this.baseGen ? action.live : { gen: this.baseGen, drawn: 0 };
+    action.live = live;
+    let k = live.drawn;
+    while (k + 1 < settled.points.length && along[k + 1] <= until) k++;
+    if (k > live.drawn) {
+      const base = this.baseCtx;
+      base.save();
+      this.setPageTransform(base, action.pageIndex);
+      if (!this.infinite) {
+        base.beginPath();
+        base.rect(0, 0, page.width, page.height);
+        base.clip();
+      }
+      fillStroke(base, stroke, traceOutline(new Path2D(), settled.points, settled.radii, live.drawn, k));
+      base.restore();
+      live.drawn = k;
+    }
+    // The rest, with the prediction, from where the settled part ends.
+    const outline = action.predicted.length
+      ? inkOutline({ ...stroke, points: [...stroke.points, ...action.predicted.map(toArray)] }, 2.5)
+      : settled;
+    if (live.drawn < outline.points.length - 1 || live.drawn === 0) {
+      fillStroke(ctx, stroke, traceOutline(new Path2D(), outline.points, outline.radii, live.drawn, outline.points.length - 1));
+    }
+  }
+
   renderWet() {
     const ctx = this.wetCtx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -704,11 +763,7 @@ export class DocumentView {
         ctx.clip();
       }
       if (action.type === 'ink') {
-        // A lightweight preview (no ids or rounding) with slightly coarser
-        // curve steps; the saved stroke gets the full treatment on lift.
-        const toArray = (p) => (p.azimuth === undefined ? [p.x, p.y, p.pressure] : [p.x, p.y, p.pressure, p.azimuth, p.altitude]);
-        const stroke = { ...action.pen, points: [...action.points, ...action.predicted].map(toArray) };
-        fillStroke(ctx, stroke, traceStroke(new Path2D(), stroke, inkCurve(stroke, 2.5)));
+        this.renderLiveInk(ctx, action, page);
       } else if (action.type === 'move' || action.type === 'scale') {
         if (action.type === 'move') {
           ctx.translate(action.dx, action.dy);
@@ -897,7 +952,7 @@ export class DocumentView {
     const { x, y } = this.toDoc(e.clientX, e.clientY);
     // Mouse and finger report 0.5 (or 0) while pressed; the Pencil reports real pressure.
     const pressure = e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5;
-    const point = { x, y: y - top, pressure };
+    const point = { x, y: y - top, pressure, t: e.timeStamp };
     if (e.pointerType === 'pen' && Number.isFinite(e.azimuthAngle) && Number.isFinite(e.altitudeAngle)) {
       point.azimuth = e.azimuthAngle;
       point.altitude = e.altitudeAngle;
@@ -956,7 +1011,7 @@ export class DocumentView {
         const inkRadius = strokeRadius(this.tool, 0.5);
         const snap = rulerSnapLine(this.ruler, docPoint.x, docPoint.y, inkRadius);
         this.action = {
-          ...base, type: 'ink', pen: { ...this.tool }, points: [], predicted: [], snap, snapped: false,
+          ...base, type: 'ink', pen: { ...this.tool, res: 1 / this.scale }, points: [], predicted: [], snap, snapped: false,
           holdAnchor: point, holdTimer: 0,
         };
         this.addInkPoints([point]);
@@ -1004,6 +1059,8 @@ export class DocumentView {
     const steady = a.pen.stabilize ?? 0;
     for (const raw of points) {
       let p = keepAngles ? raw : { x: raw.x, y: raw.y, pressure: raw.pressure };
+      (a.recent ??= []).push(raw);
+      if (a.recent.length > 8) a.recent.shift();
       a.lastRaw = p;
       if (steady > 0) {
         const follow = 1 - steady * 0.85;
@@ -1025,6 +1082,28 @@ export class DocumentView {
     }
   }
 
+  // Where the Pencil is about to be: the browser's prediction when it gives
+  // one, otherwise the recent motion carried on for PREDICT_MS. Only shown
+  // while writing; the saved stroke uses real points only.
+  predictInk(action, event) {
+    const native = event.getPredictedEvents?.() ?? [];
+    if (native.length) return native.slice(0, 2).map((e) => this.samplePoint(e, action.top));
+    const recent = action.recent ?? [];
+    if (recent.length < 3) return [];
+    const last = recent[recent.length - 1];
+    // Average speed over the last ~30 ms, which steadies the guess.
+    let first = recent[recent.length - 2];
+    for (let i = recent.length - 2; i >= 0 && last.t - recent[i].t <= 30; i--) first = recent[i];
+    const dt = last.t - first.t;
+    if (!(dt > 2)) return [];
+    const vx = (last.x - first.x) / dt;
+    const vy = (last.y - first.y) / dt;
+    const speed = Math.hypot(vx, vy) * this.scale; // CSS px per ms
+    if (speed < 0.05) return []; // resting or nearly: nothing to guess
+    const reach = Math.min(PREDICT_MS, PREDICT_MAX / speed);
+    return [{ ...last, x: last.x + vx * reach, y: last.y + vy * reach }];
+  }
+
   // Holding the Pencil still at the end of a stroke turns it into a clean shape.
   armShapeHold(point) {
     const a = this.action;
@@ -1040,6 +1119,7 @@ export class DocumentView {
       a.shape = meta;
       a.predicted = [];
       a.snapped = true;
+      this.baseDirty = true; // clears the part of the stroke drawn there
       this.requestFrame();
     }, SHAPE_HOLD_TIME);
   }
@@ -1060,7 +1140,7 @@ export class DocumentView {
           action.shape = undefined;
         }
         this.addInkPoints(points);
-        action.predicted = action.snap ? [] : (event.getPredictedEvents?.() ?? []).slice(0, 2).map((e) => this.samplePoint(e, action.top));
+        action.predicted = action.snap ? [] : this.predictInk(action, event);
         const last = points[points.length - 1];
         if (Math.hypot(last.x - action.holdAnchor.x, last.y - action.holdAnchor.y) * this.scale > SHAPE_HOLD_SLOP) this.armShapeHold(last);
         break;
