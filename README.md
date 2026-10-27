@@ -16,11 +16,11 @@ Original code; inspired by user-visible note-taking workflows (see `docs/`).
   in the sidebar.
 - Whiteboards: an infinite canvas (New notebook → Type → Whiteboard) with a
   minimap and 5–400% zoom.
-- Draw and hold to snap: lines, curves, arrows (straight, curved,
-  double-headed), triangles, squares/rectangles, diamonds, 5–8-sided
-  polygons, circles/ellipses. Draw a "V" at a line's end and hold to give it
-  an arrowhead.
-- Connectors: a line or arrow between shapes follows them when they move,
+- Draw and hold to snap: straight lines, curves, triangles,
+  squares/rectangles, diamonds, 5–8-sided polygons, circles/ellipses.
+  Open strokes only become lines or curves (arrow snapping is off; a flick
+  at the end is ignored).
+- Connectors: a line between shapes follows them when they move,
   keeping its curve. Lock content in place from the selection bar.
 - Brush pen and ink settings (sliders button): pressure sensitivity, tip
   sharpness, tip flatness, stabilization. Eyedropper (I).

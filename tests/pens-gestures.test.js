@@ -114,7 +114,7 @@ test('a whiteboard is framed around its content for thumbnails and PDF', () => {
 test('a stroke with a barb at its end is recognized as an arrow', () => {
   const shaft = pts((t) => ({ x: 100 + t * 300, y: 200 + Math.sin(t * 10) * 2 }), 40);
   const barb = pts((t) => ({ x: 400 - t * 30, y: 200 - t * 22 }), 8).slice(1);
-  const shape = recognizeShape([...shaft, ...barb]);
+  const shape = recognizeShape([...shaft, ...barb], { arrows: true });
   assert.equal(shape.kind, 'arrow');
   assert.deepEqual(shape.start, [100, 200]);
   assert.ok(Math.abs(shape.end[0] - 400) < 1 && Math.abs(shape.end[1] - 200) < 0.01);

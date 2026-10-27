@@ -35,7 +35,7 @@ test('a curve with a barb at the end becomes a curved arrow with the head along 
   const shaft = pts(arc);
   const tip = shaft[shaft.length - 1];
   // The arc arrives heading up (north) at its end.
-  const shape = recognizeShape([...shaft, ...barb(tip, -Math.PI / 2, 1)].map(wobble));
+  const shape = recognizeShape([...shaft, ...barb(tip, -Math.PI / 2, 1)].map(wobble), { arrows: true });
   assert.equal(shape.kind, 'curved-arrow');
   assert.deepEqual(shape.heads, { start: false, end: true });
   assert.ok(near(shape.end, [300, 100], 4));
@@ -51,7 +51,7 @@ test('a straight arrow with heads at both ends is recognized', () => {
   const shaft = pts((t) => ({ x: 100 + 300 * t, y: 200 }), 40);
   // Drawn starting at one barb, into the start tip, along the shaft, then the end barb.
   const startBarb = barb(start, Math.PI, -1).reverse();
-  const shape = recognizeShape([...startBarb, ...shaft, ...barb(end, 0, 1)].map(wobble));
+  const shape = recognizeShape([...startBarb, ...shaft, ...barb(end, 0, 1)].map(wobble), { arrows: true });
   assert.equal(shape.kind, 'arrow');
   assert.deepEqual(shape.heads, { start: true, end: true });
   assert.ok(Math.abs(shape.start[1] - 200) < 3 && Math.abs(shape.end[1] - 200) < 3);
@@ -60,7 +60,7 @@ test('a straight arrow with heads at both ends is recognized', () => {
 test('a standalone V becomes a symmetric arrowhead', () => {
   const tip = { x: 300, y: 300 };
   const v = [...pts((t) => ({ x: 270 + 30 * t, y: 270 + 30 * t }), 10), ...pts((t) => ({ x: 300 - 31 * t, y: 300 + 29 * t }), 10).slice(1)];
-  const shape = recognizeShape(v);
+  const shape = recognizeShape(v, { arrows: true });
   assert.equal(shape.kind, 'chevron');
   assert.ok(near(shape.tip, [300, 300], 2));
   assert.ok(shape.pointing[0] > 0.9, 'points right');
@@ -188,5 +188,19 @@ test('a closed shape with a little hook where the pen lifts is not an arrow', ()
   }
   // A real arrow still is one.
   const shaft = pts((t) => ({ x: 100 + 300 * t, y: 200 }), 40);
-  assert.equal(recognizeShape([...shaft, ...barb({ x: 400, y: 200 }, 0, 1)].map(wobble)).kind, 'arrow');
+  assert.equal(recognizeShape([...shaft, ...barb({ x: 400, y: 200 }, 0, 1)].map(wobble), { arrows: true }).kind, 'arrow');
+});
+
+test('with arrows off (the app), a line or curve with a hook at the end stays a plain line or curve', () => {
+  const shaft = pts((t) => ({ x: 100 + 300 * t, y: 200 }), 40);
+  const line = recognizeShape([...shaft, ...barb({ x: 400, y: 200 }, 0, 1)].map(wobble));
+  assert.equal(line.kind, 'line');
+  assert.deepEqual(line.heads, { start: false, end: false });
+  assert.ok(near(line.end, [400, 200], 4), 'ends at the tip, not at the end of the hook');
+  const curve = recognizeShape([...pts(arc), ...barb(pts(arc).at(-1), -Math.PI / 2, 1)].map(wobble));
+  assert.equal(curve.kind, 'curve');
+  assert.deepEqual(curve.heads, { start: false, end: false });
+  // A "V" on its own isn't turned into an arrowhead.
+  const v = [...pts((t) => ({ x: 100 + 40 * t, y: 100 + 40 * t }), 10), ...pts((t) => ({ x: 140 - 40 * t, y: 140 + 40 * t }), 10).slice(1)];
+  assert.notEqual(recognizeShape(v)?.kind, 'chevron');
 });

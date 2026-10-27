@@ -507,13 +507,16 @@ function snapLine(a, b) {
 }
 
 // Recognizes a hand-drawn shape held at the end of the stroke:
-//   open:   line, curve, arrow, curved arrow, double-headed arrow, arrowhead (V)
+//   open:   line, curve; with `arrows`, also arrow, curved arrow,
+//           double-headed arrow and arrowhead (V)
 //   closed: triangle, rectangle/square, diamond, polygon (5–8 sides), ellipse/circle
+// Arrows are off in the app: open strokes only become straight or curved
+// lines, and a hook at an end (a flick of the Pencil) is dropped.
 // points: [{ x, y }]. Returns { kind, points, ... } with clean points, or null.
 // Lines, curves and arrows also return `controls` (a cubic Bézier: start,
 // two handles, end) and `heads` ({ start, end }), so they can be rebuilt
 // when used as connectors.
-export function recognizeShape(points) {
+export function recognizeShape(points, { arrows = false } = {}) {
   if (points.length < 3) return null;
   const length = pathLength(points);
   const xs = points.map((p) => p.x);
@@ -539,13 +542,19 @@ export function recognizeShape(points) {
   const loop = closeLoop(points, diag);
   if (loop) return recognizeClosed(loop, diag);
 
-  // Arrows, straight or curved: a shaft with a barb doubling back at either end.
+  // Arrows, straight or curved: a shaft with a barb doubling back at either
+  // end. Without arrows, the barb is dropped and the shaft is the line.
   const arrow = recognizeArrow(points);
-  if (arrow) return arrow;
+  if (arrow) {
+    if (arrows) return arrow;
+    return connectorShape(arrow.controls.map(([x, y]) => ({ x, y })), { start: false, end: false });
+  }
 
   // An arrowhead on its own: two similar arms meeting at a point.
-  const chevron = recognizeChevron(points, diag);
-  if (chevron) return chevron;
+  if (arrows) {
+    const chevron = recognizeChevron(points, diag);
+    if (chevron) return chevron;
+  }
 
   // Open curve: one smooth bend (or an S), fitted with a single cubic Bézier.
   if (gap > diag * 0.3) {
