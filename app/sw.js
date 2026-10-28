@@ -8,7 +8,7 @@
 // VERSION must match APP_VERSION in src/version.js (a test checks this).
 // Change it whenever you publish, so devices pick up the new files.
 
-const VERSION = '1.2.5';
+const VERSION = '1.2.6';
 const CACHE = `inkwell-${VERSION}`;
 const SHELL = [
   './',

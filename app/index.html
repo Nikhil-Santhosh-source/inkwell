@@ -222,7 +222,8 @@
       <h2>Pencil gestures</h2>
       <label class="menu-row"><input type="checkbox" id="gesture-scribble"> Scribble to erase</label>
       <label class="menu-row"><input type="checkbox" id="gesture-circle"> Circle to select</label>
-      <label class="menu-row"><input type="checkbox" id="gesture-double"> Double-tap to undo / redo</label>
+      <label class="menu-row"><input type="checkbox" id="gesture-taps"> One finger: double-tap undo, triple-tap redo</label>
+      <label class="menu-row"><input type="checkbox" id="gesture-double"> Two/three-finger taps must be double</label>
       <label class="menu-row"><input type="checkbox" id="finger-draw"> Draw with finger</label>
       <button id="show-shortcuts" class="menu-row">Shortcuts &amp; gestures</button>
       <h2>Appearance</h2>
@@ -310,6 +311,8 @@
         <section>
           <h3>Gestures</h3>
           <dl>
+            <dt>Double-tap (one finger)</dt><dd>Undo</dd>
+            <dt>Triple-tap (one finger)</dt><dd>Redo</dd>
             <dt>Two-finger tap</dt><dd>Undo</dd>
             <dt>Three-finger tap</dt><dd>Redo</dd>
             <dt>One finger drag</dt><dd>Scroll the pages</dd>

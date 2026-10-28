@@ -38,6 +38,11 @@ const PALM_SIZE = 110;
 const MOVE_SLOP = 10; // CSS px before a touch counts as a drag
 const TAP_TIME = 350; // ms
 const DOUBLE_TAP_TIME = 400; // ms between the two taps of a double tap
+// One finger: double-tap = undo, triple-tap = redo. Undo waits this long
+// after the second tap in case a third is coming.
+const MULTI_TAP_TIME = 300; // ms allowed between taps
+const MULTI_TAP_SLOP = 40; // CSS px the taps may be apart
+const MULTI_TAP_PEN_QUIET = 600; // ms after writing during which one-finger taps are ignored (fingers of the writing hand)
 const PEN_QUIET_TIME = 150; // ms after the Pencil lifts during which finger taps are ignored
 const SHAPE_HOLD_TIME = 550; // ms the Pencil rests at the end of a stroke to turn it into a shape
 // Measured on screen, not on the page: zoomed in, a few page units is a
@@ -75,7 +80,7 @@ export class DocumentView {
     this.onLoopDrawn = onLoopDrawn;
     this.initialZoom = initialZoom;
     // Pencil gestures, switchable in settings.
-    this.gestures = { scribble: true, circle: true, doubleTap: false };
+    this.gestures = { scribble: true, circle: true, doubleTap: false, fingerTaps: true };
     this.colorPick = null; // eyedropper: called with the colour under the next tap
     this.minimapVisible = true;
 
@@ -1470,6 +1475,10 @@ export class DocumentView {
     }
     const now = performance.now();
     const isTap = !cancelled && !g.moved && now - g.start < TAP_TIME && now - this.lastPenUp > PEN_QUIET_TIME;
+    if (isTap && g.maxTouches === 1 && this.gestures.fingerTaps) {
+      this.oneFingerTap(this.toLocal(event.clientX, event.clientY), now);
+      return;
+    }
     if (!isTap || (g.maxTouches !== 2 && g.maxTouches !== 3)) return;
     if (this.gestures.doubleTap) {
       // Undo/redo on the second of two quick taps with the same number of fingers.
@@ -1480,6 +1489,28 @@ export class DocumentView {
     }
     if (g.maxTouches === 2) this.onUndo?.();
     else this.onRedo?.();
+  }
+
+  // Counts quick one-finger taps in the same spot: two undo, three redo.
+  oneFingerTap(at, now) {
+    clearTimeout(this.tapTimer);
+    if (now - this.lastPenUp < MULTI_TAP_PEN_QUIET) {
+      this.taps = null;
+      return;
+    }
+    const prev = this.taps;
+    const follows = prev && now - prev.time < MULTI_TAP_TIME && Math.hypot(at.x - prev.at.x, at.y - prev.at.y) < MULTI_TAP_SLOP;
+    this.taps = { count: follows ? prev.count + 1 : 1, time: now, at };
+    if (this.taps.count === 3) {
+      this.taps = null;
+      this.onRedo?.();
+    } else if (this.taps.count === 2) {
+      this.tapTimer = setTimeout(() => {
+        this.taps = null;
+        // Not if writing started meanwhile.
+        if (performance.now() - this.lastPenUp > MULTI_TAP_TIME && !this.action) this.onUndo?.();
+      }, MULTI_TAP_TIME);
+    }
   }
 
   cancelGesture() {

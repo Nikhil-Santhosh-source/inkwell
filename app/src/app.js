@@ -66,7 +66,7 @@ const DEFAULT_TOOLS = {
   eraser: { width: SIZES.eraser[1], presets: SIZES.eraser, mode: 'stroke' },
   text: { color: PEN_COLORS[0], width: SIZES.text[1], presets: SIZES.text },
   penSettings: structuredClone(PEN_STYLE_DEFAULTS), // per pen style: sens, taper, flat, stab
-  gestures: { scribble: true, circle: true, doubleTap: false },
+  gestures: { scribble: true, circle: true, doubleTap: false, fingerTaps: true },
   favorites: [],
   allowFinger: false,
   showPages: false,
@@ -2079,6 +2079,7 @@ async function start() {
   toggle('gesture-scribble', () => tools.gestures.scribble, (v) => { tools.gestures.scribble = v; });
   toggle('gesture-circle', () => tools.gestures.circle, (v) => { tools.gestures.circle = v; });
   toggle('gesture-double', () => tools.gestures.doubleTap, (v) => { tools.gestures.doubleTap = v; });
+  toggle('gesture-taps', () => tools.gestures.fingerTaps, (v) => { tools.gestures.fingerTaps = v; });
   toggle('minimap-toggle', () => tools.minimap, (v) => {
     tools.minimap = v;
     editor?.view.setMinimapVisible(v);
