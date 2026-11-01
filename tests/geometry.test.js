@@ -227,3 +227,15 @@ test('near-duplicate Pencil samples do not put kinks in a smooth curve', () => {
   assert.equal(merged[1][2], 0.7);
   assert.deepEqual(merged.at(-1), withDupes.at(-1));
 });
+
+test('circling the words of a wide text box selects it, though its centre is outside the loop', () => {
+  const box = [{ id: 't', x: 0, y: 0, width: 400, height: 40 }];
+  assert.deepEqual(itemsInLasso(box, [[-10, -10], [130, -10], [130, 50], [-10, 50]]), ['t']);
+  assert.deepEqual(itemsInLasso(box, [[-10, -10], [40, -10], [40, 50], [-10, 50]]), [], 'just touching its end does not');
+});
+
+test('circling one short word in a wide text box selects it', () => {
+  const box = [{ id: 't', type: 'text', x: 0, y: 0, width: 400, height: 30, size: 20, text: 'Hello', lines: ['Hello'] }];
+  assert.deepEqual(itemsInLasso(box, [[-5, -5], [65, -5], [65, 35], [-5, 35]]), ['t']);
+  assert.deepEqual(itemsInLasso(box, [[100, -5], [300, -5], [300, 35], [100, 35]]), [], 'empty part of the box');
+});

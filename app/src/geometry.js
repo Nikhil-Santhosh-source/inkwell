@@ -434,11 +434,27 @@ export function itemBounds(item) {
 }
 
 // Ids of items whose centre is inside the lasso.
+// Items with a quarter or more of their area inside the lasso. A text box is
+// usually wider than its words, so circling the words must be enough: the
+// box's centre may well be outside the loop.
 export function itemsInLasso(items, polygon) {
   if (polygon.length < 3) return [];
-  return items
-    .filter((i) => pointInPolygon(i.x + i.width / 2, i.y + i.height / 2, polygon))
-    .map((i) => i.id);
+  const STEPS = 8;
+  return items.filter((item) => {
+    let inside = 0;
+    // Text counts by the part its words fill (roughly: letters are about
+    // half as wide as they are tall), not the whole box.
+    const lines = item.type === 'text' ? item.lines ?? [item.text] : null;
+    const width = lines ? Math.min(item.width, Math.max(...lines.map((l) => l.length)) * item.size * 0.55) : item.width;
+    for (let row = 0; row < STEPS; row++) {
+      for (let col = 0; col < STEPS; col++) {
+        const x = item.x + (width * (col + 0.5)) / STEPS;
+        const y = item.y + (item.height * (row + 0.5)) / STEPS;
+        if (pointInPolygon(x, y, polygon)) inside++;
+      }
+    }
+    return inside >= (STEPS * STEPS) / 4;
+  }).map((i) => i.id);
 }
 
 // The topmost item under a point, or null.

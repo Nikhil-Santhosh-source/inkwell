@@ -694,6 +694,10 @@ button.menu-row:active { transform: none; background: var(--surface-2); }
 .selection-bar button { min-height: 36px; padding: 0 12px; border: none; background: transparent; color: var(--inverse-text); font-size: 0.88rem; font-weight: 500; border-radius: var(--r-sm); }
 .selection-bar button:hover { background: hsl(0 0% 50% / 0.22); }
 .selection-bar button.danger { color: var(--inverse-danger); }
+.sel-colors { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 6px; }
+.selection-bar .swatch { width: 26px; height: 26px; min-height: 26px; padding: 0; border-radius: 50%; border: 2px solid hsl(0 0% 50% / 0.6); }
+.quick-color { width: 28px; height: 28px; min-height: 28px; margin: 0 2px; }
+.toolbar.vertical .quick-color { margin: 2px 0; }
 
 .page-indicator, .zoom-indicator {
   position: absolute;

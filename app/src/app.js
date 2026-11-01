@@ -68,6 +68,13 @@ const DEFAULT_TOOLS = {
   penSettings: structuredClone(PEN_STYLE_DEFAULTS), // per pen style: sens, taper, flat, stab
   gestures: { scribble: true, circle: true, doubleTap: false, fingerTaps: true },
   favorites: [],
+  // One-tap colours in the toolbar and on a selection. New colours take a
+  // slot in turn, so the others stay where your hand expects them.
+  quick: {
+    pen: { colors: [PEN_COLORS[0], PEN_COLORS[1], PEN_COLORS[2], PEN_COLORS[3], PEN_COLORS[6]], next: 0 },
+    highlighter: { colors: HIGHLIGHTER_COLORS.slice(0, 4), next: 0 },
+    text: { colors: [PEN_COLORS[0], PEN_COLORS[1], PEN_COLORS[2], PEN_COLORS[3], PEN_COLORS[6]], next: 0 },
+  },
   allowFinger: false,
   showPages: false,
   minimap: true,
@@ -799,9 +806,11 @@ function placeSelectionBar(hasSelection) {
   const rect = hasSelection && editor?.view.selectionRect();
   selectionBar.hidden = !rect;
   if (!rect) return;
+  renderSelectionColors();
   const wrap = $('canvas-wrap');
   const above = rect.top - 58;
-  selectionBar.style.left = `${Math.min(Math.max((rect.left + rect.right) / 2, 140), wrap.clientWidth - 140)}px`;
+  const half = selectionBar.offsetWidth / 2 + 8;
+  selectionBar.style.left = `${Math.min(Math.max((rect.left + rect.right) / 2, half), wrap.clientWidth - half)}px`;
   selectionBar.style.top = `${above > 8 ? above : Math.min(rect.bottom + 22, wrap.clientHeight - 56)}px`;
 }
 
@@ -1126,20 +1135,43 @@ function colorToolKey() {
   return 'pen';
 }
 
+// Recolors what's selected, handwriting and text alike. False if nothing is.
+function recolorSelection(color) {
+  const sel = selectedContent();
+  if (!sel) return false;
+  const textChanges = sel.items.filter((i) => i.type === 'text' && i.color !== color)
+    .map((before) => ({ before, after: { ...before, color } }));
+  edit(sel.page.id, batchCommand([
+    recolorStrokesCommand(sel.page, sel.strokes.map((s) => s.id), color),
+    updateCommand([], textChanges),
+  ]));
+  return true;
+}
+
+// Puts a colour in the tool's quick slots, unless it's already there.
+function rememberQuickColor(key, color) {
+  const quick = tools.quick[key];
+  if (!quick || quick.colors.includes(color)) return;
+  quick.colors[quick.next] = color;
+  quick.next = (quick.next + 1) % quick.colors.length;
+}
+
+function renderSelectionColors() {
+  const colors = tools.quick.pen.colors.map((color) => swatch(color, false, `Change selection to ${color}`));
+  const more = document.createElement('button');
+  more.className = 'swatch color-btn';
+  more.style.background = 'conic-gradient(#d12f2f, #e07b00, #1d8a4a, #1f5fd1, #7b3fc4, #d12f2f)';
+  more.setAttribute('aria-label', 'More colours');
+  more.addEventListener('click', toggleColorMenu);
+  $('sel-colors').replaceChildren(...colors, more);
+}
+
 function pickColor(color) {
   $('color-menu').hidden = true;
-  // With a lasso selection, a color tap recolors the selection.
-  const sel = tools.tool === 'lasso' ? selectedContent() : null;
-  if (sel) {
-    const textChanges = sel.items.filter((i) => i.type === 'text' && i.color !== color)
-      .map((before) => ({ before, after: { ...before, color } }));
-    edit(sel.page.id, batchCommand([
-      recolorStrokesCommand(sel.page, sel.strokes.map((s) => s.id), color),
-      updateCommand([], textChanges),
-    ]));
-    return;
-  }
-  tools[colorToolKey()].color = color;
+  if (recolorSelection(color)) return;
+  const key = colorToolKey();
+  tools[key].color = color;
+  rememberQuickColor(key, color);
   if (tools.tool === 'lasso') tools.tool = 'pen';
   saveTools();
   renderToolbar();
@@ -1373,7 +1405,13 @@ function renderToolbar() {
     currentButton.setAttribute('aria-haspopup', 'true');
     currentButton.setAttribute('aria-expanded', String(!$('color-menu').hidden));
     currentButton.addEventListener('click', toggleColorMenu);
-    colors = [currentButton, eyedropperButton()];
+    // One tap to change colour; the big circle has the full palette.
+    const quick = tools.quick[key].colors.map((color) => {
+      const button = swatch(color, showPressed && color === current);
+      button.classList.add('quick-color');
+      return button;
+    });
+    colors = [currentButton, ...quick, eyedropperButton()];
   }
   $('colors').replaceChildren(...colors);
   $('color-menu-body').replaceChildren(...menu);
