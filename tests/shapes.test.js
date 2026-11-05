@@ -226,3 +226,19 @@ test('snapped lines keep their full width to the ends (no taper)', () => {
   assert.ok(free[0] < free[15] * 0.6, 'freehand strokes still taper');
   assert.ok(Math.abs(snapped[0] - snapped[15]) < 1e-9 && Math.abs(snapped.at(-1) - snapped[15]) < 1e-9);
 });
+
+test('a snapped line or curve reaches as far as the Pencil went, though the hand drifts back as it stops', () => {
+  for (const drift of [[3, 4], [6, 6], [10, 8]]) {
+    const line = pts((t) => ({ x: 100 + 300 * (1 - (1 - t) ** 2), y: 200 }), 80);
+    const end = line.at(-1);
+    const back = Array.from({ length: 6 }, (_, i) => ({ x: end.x - (drift[0] * (i + 1)) / 6, y: end.y + (drift[1] * (i + 1)) / 6 }));
+    const shape = recognizeShape([...line, ...back]);
+    assert.equal(shape.kind, 'line');
+    assert.ok(near(shape.end, [400, 200], 1.5), `drift ${drift}: ends at ${shape.end}`);
+    // And a skid at the start, the other way.
+    const skid = Array.from({ length: 5 }, (_, i) => ({ x: 100 + (5 - i) * 1.5, y: 200 + (5 - i) }));
+    const both = recognizeShape([...skid, ...line, ...back]);
+    assert.ok(near(both.start, [100, 200], 2), `starts at ${both.start}`);
+    assert.ok(near(both.end, [400, 200], 1.5));
+  }
+});

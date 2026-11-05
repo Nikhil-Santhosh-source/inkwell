@@ -534,7 +534,8 @@ function snapLine(a, b) {
 // Lines, curves and arrows also return `controls` (a cubic Bézier: start,
 // two handles, end) and `heads` ({ start, end }), so they can be rebuilt
 // when used as connectors.
-export function recognizeShape(points, { arrows = false } = {}) {
+export function recognizeShape(input, { arrows = false } = {}) {
+  let points = input;
   if (points.length < 3) return null;
   const length = pathLength(points);
   const xs = points.map((p) => p.x);
@@ -545,6 +546,17 @@ export function recognizeShape(points, { arrows = false } = {}) {
   const maxY = Math.max(...ys);
   const diag = Math.hypot(maxX - minX, maxY - minY);
   if (length < 24 || diag < 16) return null;
+
+  // A stroke that comes back to where it started is a closed shape, even
+  // with an overshoot or a little hook at the end; never an arrow.
+  const loop = closeLoop(points, diag);
+  if (loop) return recognizeClosed(loop, diag);
+
+  // Open strokes end where the Pencil reached furthest: the hand drifts
+  // back a little as it stops to hold (and can skid as it lands), and
+  // ending there made snapped lines shorter than what was drawn. (With
+  // arrows on, a barb doubling back is the arrowhead, so it's kept.)
+  if (!arrows) points = reachedEnds(points, length);
   const first = points[0];
   const last = points[points.length - 1];
   const gap = Math.hypot(last.x - first.x, last.y - first.y);
@@ -554,11 +566,6 @@ export function recognizeShape(points, { arrows = false } = {}) {
   if (gap > length * 0.8 && maxDeviation < Math.max(5, gap * 0.07)) {
     return connectorShape(straightControls(first, snapLine(first, last)), { start: false, end: false });
   }
-
-  // A stroke that comes back to where it started is a closed shape, even
-  // with an overshoot or a little hook at the end; never an arrow.
-  const loop = closeLoop(points, diag);
-  if (loop) return recognizeClosed(loop, diag);
 
   // Arrows, straight or curved: a shaft with a barb doubling back at either
   // end. Without arrows, the barb is dropped and the shaft is the line.
@@ -581,6 +588,34 @@ export function recognizeShape(points, { arrows = false } = {}) {
     return null;
   }
   return recognizeClosed(points, diag);
+}
+
+// Trims the drift at each end of an open stroke: within the last (and first)
+// 12% of its length, the stroke ends at the point furthest along the
+// direction it was travelling there.
+function reachedEnds(points, length) {
+  const along = [0];
+  for (let i = 1; i < points.length; i++) along.push(along[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+  const at = (d) => points[Math.max(0, along.findIndex((v) => v >= d))] ?? points[points.length - 1];
+  const furthest = (from, to, lo, hi) => {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    let best = -1;
+    let bestValue = -Infinity;
+    for (let i = 0; i < points.length; i++) {
+      if (along[i] < lo || along[i] > hi) continue;
+      const value = points[i].x * dx + points[i].y * dy;
+      if (value > bestValue) {
+        bestValue = value;
+        best = i;
+      }
+    }
+    return best;
+  };
+  const end = furthest(at(length * 0.75), at(length * 0.9), length * 0.88, length);
+  const start = furthest(at(length * 0.25), at(length * 0.1), 0, length * 0.12);
+  if (start < 0 || end <= start) return points;
+  return points.slice(start, end + 1);
 }
 
 // The part of a stroke that goes once round, if its end comes back near its
