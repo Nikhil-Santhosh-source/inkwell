@@ -131,6 +131,13 @@ export class DocumentView {
       [this.wet, 'pointermove', (e) => this.handleMove(e)],
       [this.wet, 'pointerup', (e) => this.handleUp(e, false)],
       [this.wet, 'pointercancel', (e) => this.handleUp(e, true)],
+      // iPadOS can drop the Pencil's "lifted" event (a palm, an edge swipe or
+      // a notification getting in the way). Losing the pointer counts as
+      // lifting it, so the next stroke isn't blocked by one that never ended.
+      [this.wet, 'lostpointercapture', (e) => this.handleUp(e, true)],
+      [document, 'visibilitychange', () => {
+        if (document.visibilityState === 'hidden' && this.action) this.finishAction(true);
+      }],
       [this.wet, 'wheel', (e) => this.handleWheel(e), { passive: false }],
       [this.minimap, 'pointerdown', (e) => this.minimapNavigate(e, true)],
       [this.minimap, 'pointermove', (e) => this.minimapNavigate(e, false)],
@@ -460,7 +467,23 @@ export class DocumentView {
   }
 
   requestFrame() {
-    if (!this.frame && !this.inFrame) this.frame = requestAnimationFrame(() => this.renderFrame());
+    if (this.inFrame) return;
+    if (this.frame) {
+      // Safari sometimes never runs a requested frame (after a system
+      // gesture or overlay). If it's overdue, ask again instead of waiting
+      // forever, which froze the ink until the app was left and reopened.
+      if (performance.now() - this.frameAsked < 250) return;
+      cancelAnimationFrame(this.frame);
+    }
+    this.frameAsked = performance.now();
+    this.frame = requestAnimationFrame(() => this.renderFrame());
+    clearTimeout(this.frameWatchdog);
+    this.frameWatchdog = setTimeout(() => {
+      if (this.frame) {
+        cancelAnimationFrame(this.frame);
+        this.renderFrame();
+      }
+    }, 500);
   }
 
   // Transform for drawing page `index` in page units.
@@ -471,13 +494,17 @@ export class DocumentView {
 
   renderFrame() {
     this.frame = 0;
+    clearTimeout(this.frameWatchdog);
     if (!this.pages.length) return;
     this.inFrame = true; // view changes made here are drawn in this frame
-    if (this.gesturePending) {
-      this.gesturePending = false;
-      this.stepGesture();
+    try {
+      if (this.gesturePending) {
+        this.gesturePending = false;
+        this.stepGesture();
+      }
+    } finally {
+      this.inFrame = false; // never left set: it would stop all drawing
     }
-    this.inFrame = false;
     if (this.baseDirty) {
       this.baseDirty = false;
       this.viewDirty = false;
@@ -906,7 +933,16 @@ export class DocumentView {
       return;
     }
     const isPen = event.pointerType === 'pen' || (event.pointerType === 'mouse' && event.button === 0);
-    if (!isPen || this.action) return;
+    if (!isPen) return;
+    if (this.action) {
+      // The Pencil can't be down twice: the earlier stroke's end never
+      // arrived. Finish it and carry on, rather than ignoring the Pencil.
+      if (this.action.pointerType === 'touch' || event.pointerId !== this.action.pointerId || event.isPrimary) {
+        this.finishAction(true);
+      } else {
+        return;
+      }
+    }
     // The Pencil wins: drop any finger gesture (usually a resting palm).
     this.cancelGesture();
     this.startAction(event);
@@ -1396,6 +1432,12 @@ export class DocumentView {
   // ---- Finger gestures ----
 
   touchDown(event) {
+    // The first finger of a new touch: anything still remembered is from
+    // touches whose lifting was never reported, and would distort gestures.
+    if (event.isPrimary && this.touches.size) {
+      this.touches.clear();
+      this.gesture = null;
+    }
     if ((this.action && this.action.pointerType !== 'touch') || this.isPalm(event)) {
       this.ignoredTouches.add(event.pointerId);
       return;
