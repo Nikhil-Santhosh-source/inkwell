@@ -2127,6 +2127,16 @@ async function start() {
   on('paste-btn', 'click', () => pasteTarget && paste(pasteTarget.pageId, pasteTarget.x, pasteTarget.y));
   on('paste-menu', 'click', () => { closePopovers(); paste(); });
   on('show-shortcuts', 'click', () => { closePopovers(); $('shortcuts-dialog').showModal(); });
+  on('snap-report', 'click', async () => {
+    closePopovers();
+    let report = null;
+    try { report = localStorage.getItem('inkwell.lastSnap'); } catch { /* none */ }
+    if (!report) {
+      showToast('Snap a line first (draw it and hold), then try again.');
+      return;
+    }
+    await saveFile(JSON.stringify({ app: APP_VERSION, ...JSON.parse(report) }, null, 1), 'Inkwell snap report.json', 'application/json');
+  });
   for (const p of popovers) p.button.addEventListener('click', () => togglePopover(p));
   for (const button of document.querySelectorAll('.tool[data-tool]')) {
     button.addEventListener('click', () => selectTool(button.dataset.tool));

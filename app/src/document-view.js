@@ -1159,6 +1159,20 @@ export class DocumentView {
     return [{ ...last, x: last.x + vx * reach, y: last.y + vy * reach }];
   }
 
+  // Keeps the Pencil's points for the last snapped shape (on this device
+  // only), so a snapping problem can be saved from the menu and looked at.
+  keepSnapReport(action, stroke) {
+    const report = {
+      when: new Date().toISOString(),
+      zoom: this.zoom,
+      res: action.pen.res,
+      pen: { style: action.pen.style, width: action.pen.width, stabilize: action.pen.stabilize ?? 0 },
+      drawn: action.drawn.map((p) => [p.x, p.y, p.pressure].map((v) => Math.round(v * 100) / 100)),
+      snapped: stroke.shape,
+    };
+    try { localStorage.setItem('inkwell.lastSnap', JSON.stringify(report)); } catch { /* not critical */ }
+  }
+
   // Holding the Pencil still at the end of a stroke turns it into a clean shape.
   armShapeHold(point) {
     const a = this.action;
@@ -1315,6 +1329,7 @@ export class DocumentView {
       }
     }
     this.onCommand?.(page.id, addStrokesCommand(page, [stroke]));
+    if (action.shape && action.drawn) this.keepSnapReport(action, stroke);
 
     if (freehand && this.gestures.circle) {
       const loop = closedLoop(action.points);
